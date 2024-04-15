@@ -5,9 +5,13 @@ import math
 import yaml
 import yamlloader
 import numpy
+import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 
-from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWithTwoHands, ObjectTooFar 
+from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWithTwoHands, ObjectTooFar
+from core.utils import class_from_classname
+
 class World(Enum):
     """Worlds to be simulated."""
     GRIPPER_AND_LOW_FRICTION = 1
@@ -38,15 +42,17 @@ class Item(Enum):
 class LTMSim(Node):
     def __init__(self):
         """Init attributes when a new object is created."""
+        super().__init__("LTMSim")
         self.rng = None
         self.ident = None
         self.last_reset_iteration = 0
         self.world = None
         self.base_messages = {}
         self.perceptions = {}
-        self.publishers = {}
+        self.sim_publishers = {}
         self.catched_object = None
-
+        self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
+        self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
         self.normal_inner = numpy.poly1d(
         numpy.polyfit([0.0, 0.3925, 0.785, 1.1775, 1.57], [0.45, 0.47, 0.525, 0.65, 0.9], 3)
         )
@@ -63,7 +69,7 @@ class LTMSim(Node):
 
         self.calculate_closest_position_service = self.create_service(
             CalculateClosestPosition,
-            "simulator/calculate_closes_position",
+            "simulator/calculate_closest_position",
             self.calculate_closest_position_callback
         )
 
@@ -79,7 +85,17 @@ class LTMSim(Node):
             self.object_too_far_callback
         )
 
-    def calculate_closes_position_callback(self, request, response):
+    def calculate_closest_position_callback(self, request, response):
+        """
+        The callback to calculate the closest feasible position with a given object angle
+
+        :param request: The Request that includes the angle to the object
+        :type request: simulators_interfaces.srv.CalculateClosestPosition_Request
+        :param response: The Response that includes the closest distance and angle
+        :type response: simulators_interfaces.srv.CalculateClosestPosition_Response
+        :return: The Response that includes the closest distance and angle
+        :rtype: simulators_interfaces.srv.CalculateClosestPosition_Response
+        """
         ang = request.angle
         dist_near, ang_near = self.calculate_closest_position(ang)
         response.dist_near = dist_near
@@ -87,7 +103,14 @@ class LTMSim(Node):
         return response
     
     def calculate_closest_position(self, ang):
-        """Calculate the closest feasible position for an object taking into account the angle."""
+        """
+        Calculate the closest feasible position for an object taking into account the angle.
+
+        :param ang: The angle to the object
+        :type ang: float
+        :return: The closest distance and angle
+        :rtype: float, float
+        """
         dist = self.normal_inner(abs(ang))
         y_coord = dist * math.sin(ang)
         x_coord = dist * math.cos(ang)
@@ -102,6 +125,16 @@ class LTMSim(Node):
         return new_dist, new_ang
     
     def object_pickable_with_two_hands_callback(self, request, response):
+        """
+        The callback to calculate if an object can be pickable with two hands
+
+        :param request: The Request that includes the distance and angle to the object
+        :type request: simulators_interfaces.srv.ObjectPickableWithTwoHands_Request
+        :param response: The Response that indicates if the object is pickable or not
+        :type response: simulators_interfaces.srv.ObjectPickableWithTwoHands_Response
+        :return: The Response that indicates if the object is pickable or not
+        :rtype: simulators_interfaces.srv.ObjectPickableWithTwoHands_Response
+        """
         dist = request.distance
         ang = request.angle
         pickable = self.object_pickable_with_two_hands(dist, ang)
@@ -110,10 +143,29 @@ class LTMSim(Node):
 
     @staticmethod
     def object_pickable_with_two_hands(dist, ang):
-        """Return True if the object is in a place where it can be picked with two hands."""
+        """
+        Return True if the object is in a place where it can be picked with two hands.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: Value that indicates if the object is pickable or not
+        :rtype: bool
+        """
         return abs(ang) <= 0.3925 and 0.46 <= dist <= 0.75
     
     def object_too_far_callback(self, request, response):
+        """
+        The callback to calculate if and object is out of range of the robot
+
+        :param request: The Request that includes the distance and angle to the object
+        :type request: simulators_interfaces.srv.ObjectTooFar_Request
+        :param response: The Response that indicates if the object if out of the range or not
+        :type response: simulators_interfaces.srv.ObjectTooFar_Response
+        :return: The Response that indicates if the object if out of the range or not
+        :rtype: simulators_interfaces.srv.ObjectTooFar_Response
+        """
         dist = request.distance
         ang = request.angle
         too_far = self.object_too_far(dist, ang)
@@ -122,7 +174,16 @@ class LTMSim(Node):
     
     
     def object_too_far(self, dist, ang):
-        """Return True if the object is out of range of the robot."""
+        """
+        Return True if the object is out of range of the robot.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: Value that indicates if the object is out of range or not
+        :rtype: bool
+        """
         if self.world.name == World.GRIPPER_AND_LOW_FRICTION_SHORT_ARM.name:
             too_far = dist > self.short_outer(abs(ang))
         elif self.world.name == World.GRIPPER_AND_LOW_FRICTION_OBSTACLE.name:
@@ -139,24 +200,56 @@ class LTMSim(Node):
         return too_far
 
     def object_too_close(self, dist, ang):
-        """Return True if the object is too close to the robot to be caught."""
+        """
+        Return True if the object is too close to the robot to be caught.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: Value that indicates if the object is too close or not
+        :rtype: bool
+        """
         return dist < self.normal_inner(abs(ang))
     
     @staticmethod
     def object_outside_table(dist, ang):
-        """Return True if the object is outside the table. This is used in some scripts..."""
+        """
+        Return True if the object is outside the table. This is used in some scripts...
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: Value that indicates if the object is outside of the table or not
+        :rtype: bool
+        """
         object_y = numpy.sin(ang) * dist
         object_x = numpy.cos(ang) * dist
         return not (-1.07 <= object_y <= 1.07 and 0.37 <= object_x <= 1.27)
     
     @staticmethod
     def object_is_small(rad):
-        """Return True if the ball is small, False if it is big. Right now, small is 0.03 and big 0.07."""
+        """
+        Return True if the ball is small, False if it is big. Right now, small is 0.03 and big 0.07.
+
+        :param rad: Radius of the ball
+        :type rad: float
+        :return: The value that indicates if the ball is small or not
+        :rtype: bool
+        """
         return rad <= 0.05
     
     @staticmethod
     def send_object_twohandsreachable(dist):
-        """Calculate the coordinates of the object when moving it to a place where it can be picked with two hands."""
+        """
+        Calculate the coordinates of the object when moving it to a place where it can be picked with two hands.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :return: The calculated coordinates
+        :rtype: float, float
+        """
         x_coord = 0
         y_coord = dist
         if y_coord < 0.46:
@@ -167,7 +260,14 @@ class LTMSim(Node):
         return new_dist, 0
     
     def send_object_outofreach(self, ang):
-        """Calculate the coordinates of the object when moving it out of reach."""
+        """
+        Calculate the coordinates of the object when moving it out of reach.
+
+        :param dist: The angle to the object
+        :type dist: float
+        :return: The calculated coordinates
+        :rtype: float, float
+        """
         dist = self.normal_outer(abs(ang))
         y_coord = dist * math.sin(ang)
         x_coord = dist * math.cos(ang)
@@ -182,7 +282,16 @@ class LTMSim(Node):
         return new_dist, new_ang
     
     def object_in_close_box(self, dist, ang):
-        """Check if there is an object inside of a box."""
+        """
+        Check if there is an object inside of a box.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: The value that indicates if the object is inside of the box or not
+        :rtype: bool
+        """
         inside = False
         for box in self.perceptions["boxes"].data:
             if not self.object_too_far(box.distance, box.angle):
@@ -192,7 +301,16 @@ class LTMSim(Node):
         return inside
     
     def object_in_far_box(self, dist, ang):
-        """Check if there is an object inside of a box."""
+        """
+        Check if there is an object inside of a box.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: The value that indicates if the object is inside of the box or not
+        :rtype: bool
+        """
         inside = False
         for box in self.perceptions["boxes"].data:
             if self.object_too_far(box.distance, box.angle):
@@ -202,7 +320,16 @@ class LTMSim(Node):
         return inside
     
     def object_with_robot(self, dist, ang):
-        """Check if there is an object adjacent to the robot."""
+        """
+        Check if there is an object adjacent to the robot.
+
+        :param dist: The distance to the object
+        :type dist: float
+        :param ang: The angle to the object
+        :type ang: float
+        :return: The value that indicates if the object is adjacent or not
+        :rtype: bool
+        """
         together = False
         if (not self.perceptions["ball_in_left_hand"].data) and (
             not self.perceptions["ball_in_right_hand"].data
@@ -212,7 +339,16 @@ class LTMSim(Node):
         return together
     
     def avoid_reward_by_chance(self, distance, angle):
-        """Avoid a reward situation obtained by chance."""
+        """
+        Avoid a reward situation obtained by chance.
+
+        :param distance: The distance to the object
+        :type distance: float
+        :param angle: The angle to the object
+        :type angle: float
+        :return: The distance value to avoid the reward
+        :rtype: float
+        """
         # This is necessary so sweep never puts the object close to the robot or colliding with a box.
         # This is not realistic, it needs to be improved.
         while (
@@ -227,7 +363,12 @@ class LTMSim(Node):
         return distance
     
     def reward_ball_in_box(self):
-        """Reward for object in box goal."""
+        """
+        Reward for object in box goal.
+
+        :return: True if there is reward or False if not
+        :rtype: bool
+        """
         self.perceptions["ball_in_box"].data = False
         for cylinder in self.perceptions["cylinders"].data:
             for box in self.perceptions["boxes"].data:
@@ -238,17 +379,27 @@ class LTMSim(Node):
     
 
     def reward_ball_with_robot(self):
-            """Reward for object with robot goal."""
-            self.perceptions["ball_with_robot"].data = False
-            for cylinder in self.perceptions["cylinders"].data:
-                dist, ang = self.calculate_closest_position(cylinder.angle)
-                if (cylinder.distance == dist) and (cylinder.angle == ang):
-                    self.perceptions["ball_with_robot"].data = True
-                    return True
-            return False
+        """
+        Reward for object with robot goal.
+
+        :return: True if there is reward or False if not
+        :rtype: bool
+        """
+        self.perceptions["ball_with_robot"].data = False
+        for cylinder in self.perceptions["cylinders"].data:
+            dist, ang = self.calculate_closest_position(cylinder.angle)
+            if (cylinder.distance == dist) and (cylinder.angle == ang):
+                self.perceptions["ball_with_robot"].data = True
+                return True
+        return False
     
     def reward_clean_area(self):
-        """Reward for cleaning the table goal."""
+        """
+        Reward for cleaning the table goal.
+
+        :return: True if there is reward or False if not
+        :rtype: bool
+        """
         self.perceptions["clean_area"].data = False
         for cylinder in self.perceptions["cylinders"].data:
             for box in self.perceptions["boxes"].data:
@@ -270,7 +421,17 @@ class LTMSim(Node):
 
     
     def random_position(self, in_valid=True, out_valid=True):
-        """Return a random position in the table."""
+        """
+        Return a random position in the table.
+
+        :param in_valid: True if the position can be generated close to the robot
+        :type in_valid: bool
+        :param out_valid: True if the position can be generated away to the robot
+        :type out_valid: bool
+        :return: The distance and angle to the random position generated
+        :rtype: float, float
+        """
+        #TODO: Solve the ugly hacks to test curriculum learning and check the Sphinx description
         valid = False
         while not valid:
             object_y = self.rng.uniform(low=-1.07, high=1.07)
@@ -566,4 +727,128 @@ class LTMSim(Node):
                     cylinder.distance = self.avoid_reward_by_chance(distance - 0.1, cylinder.angle)
                     break
 
-       
+    
+    def new_command_callback(self, data):
+        """
+        Process a command received
+
+        :param data: The message that contais the command received
+        :type data: ROS msg defined in setup_control_channel
+        """
+        self.get_logger().info("Command received...")
+        if data.command == "reset_world":
+            self.last_reset_iteration = data.iteration
+            self.world = World[data.world]
+            self.random_perceptions()
+            for ident, publisher in self.sim_publishers.items():
+                self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+                publisher.publish(self.perceptions[ident])
+            if (not self.catched_object) and (
+                self.perceptions["ball_in_left_hand"].data
+                or self.perceptions["ball_in_right_hand"].data
+            ):
+                self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+        elif data.command == "end":
+            self.get_logger().info("Ending simulator as requested by LTM...")
+            rclpy.shutdown()
+
+    def new_action_callback(self, data):
+        """
+        Execute a policy and publish new perceptions.
+
+        :param data: The message that contains the policy to execute
+        :type data: ROS msg defined in setup_control_channel
+        """
+        self.get_logger().info("Executing policy " + str(data.data))
+        getattr(self, data.data + "_policy")()
+        self.update_reward_sensor()
+        for ident, publisher in self.sim_publishers.items():
+            self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            publisher.publish(self.perceptions[ident])
+        if (not self.catched_object) and (
+            self.perceptions["ball_in_left_hand"].data
+            or self.perceptions["ball_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            rclpy.shutdown()
+
+    def setup_control_channel(self, simulation):
+        """
+        Configure the ROS topic where listen for commands to be executed.
+
+        :param simulation: The params from the config file to setup the control channel
+        :type simulation: dict
+        """
+        self.ident = simulation["id"]
+        topic = simulation["control_topic"]
+        classname = simulation["control_msg"]
+        message = class_from_classname(classname)
+        self.get_logger().info("Subscribing to... " + str(topic))
+        self.create_subscription(message, topic, callback=self.new_command_callback)
+        topic = simulation["executed_policy_topic"]
+        classname = simulation["executed_policy_msg"]
+        message = class_from_classname(classname)
+        self.get_logger().info("Subscribing to... " + str(topic))
+        self.create_subscription(message, topic, callback=self.new_action_callback)
+
+    def setup_perceptions(self, perceptions):
+        """
+        Configure the ROS publishers where publish perception values.
+
+        :param perceptions: The params from the config file to setup the perceptions
+        :type perceptions: dict
+        """
+        for perception in perceptions:
+            sid = perception["id"]
+            topic = perception["perception_topic"]
+            classname = perception["perception_msg"]
+            message = class_from_classname(classname)
+            self.perceptions[sid] = message()
+            if "List" in classname:
+                self.perceptions[sid].data = []
+                self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            else:
+                self.perceptions[sid].data = 0
+            self.get_logger().info("I will publish to... " + str(topic))
+            self.sim_publishers[sid] = self.create_publisher(message, topic, 0) #TODO: ¿latch in ROS2?
+
+    def load_configuration(self):
+        """
+        Load configuration from a file.
+
+        :param random_seed: The seed for the random numbers generation
+        :type random_seed: int
+        :param config_file: The file with the params to configurate the simulation
+        :type config_file: yaml file
+        """
+        if self.config_file is None:
+            self.get_logger().error("No configuration file for the LTM simulator specified!")
+            rclpy.shutdown()
+        else:
+            if not os.path.isfile(self.config_file):
+                self.get_logger().error(self.config_file + " does not exist!")
+                rclpy.shutdown()
+            else:
+                self.get_logger().info("Loading configuration from %s...", self.config_file)
+                config = yaml.load(
+                    open(self.config_file, "r", encoding="utf-8"),
+                    Loader=yamlloader.ordereddict.CLoader,
+                )
+                self.setup_perceptions(config["SimulatedBaxter"]["Perceptions"])
+                # Be ware, we can not subscribe to control channel before creating all sensor publishers.
+                self.setup_control_channel(config["Control"])
+        if self.random_seed:
+            self.rng = numpy.random.default_rng(self.random_seed)
+            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
+        else:
+            self.rng = numpy.random.default_rng()
+
+def main(args=None):
+    rclpy.init(args=args)
+    sim = LTMSim()
+    sim.load_configuration()
+    rclpy.spin(sim)
+    sim.destroy_node()
+
+if __name__ == '__main__':
+    main()       

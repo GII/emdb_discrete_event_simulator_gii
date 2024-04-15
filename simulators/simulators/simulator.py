@@ -8,7 +8,9 @@ import numpy
 import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
+from core.service_client import ServiceClient
 
+from core_interfaces.srv import LoadConfig
 from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWithTwoHands, ObjectTooFar
 from core.utils import class_from_classname
 
@@ -84,6 +86,15 @@ class LTMSim(Node):
             "simulator/object_too_far",
             self.object_too_far_callback
         )
+
+        self.load_config_file_in_commander()
+
+    def load_config_file_in_commander(self):
+        service_name = 'commander/load_config'
+        load_client = ServiceClient(LoadConfig, service_name)
+        loaded = load_client.send_request(file = self.config_file)
+        load_client.destroy_node()
+        return loaded
 
     def calculate_closest_position_callback(self, request, response):
         """

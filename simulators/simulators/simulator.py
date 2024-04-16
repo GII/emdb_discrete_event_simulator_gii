@@ -810,7 +810,7 @@ class LTMSim(Node):
         :type perceptions: dict
         """
         for perception in perceptions:
-            sid = perception["id"]
+            sid = perception["name"]
             topic = perception["perception_topic"]
             classname = perception["perception_msg"]
             message = class_from_classname(classname)
@@ -840,7 +840,7 @@ class LTMSim(Node):
                 self.get_logger().error(self.config_file + " does not exist!")
                 rclpy.shutdown()
             else:
-                self.get_logger().info("Loading configuration from %s...", self.config_file)
+                self.get_logger().info(f"Loading configuration from {self.config_file}...")
                 config = yaml.load(
                     open(self.config_file, "r", encoding="utf-8"),
                     Loader=yamlloader.ordereddict.CLoader,

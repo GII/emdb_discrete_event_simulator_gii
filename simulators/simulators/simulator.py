@@ -795,12 +795,12 @@ class LTMSim(Node):
         classname = simulation["control_msg"]
         message = class_from_classname(classname)
         self.get_logger().info("Subscribing to... " + str(topic))
-        self.create_subscription(message, topic, callback=self.new_command_callback)
+        self.create_subscription(message, topic, self.new_command_callback, 0)
         topic = simulation["executed_policy_topic"]
         classname = simulation["executed_policy_msg"]
         message = class_from_classname(classname)
         self.get_logger().info("Subscribing to... " + str(topic))
-        self.create_subscription(message, topic, callback=self.new_action_callback)
+        self.create_subscription(message, topic, self.new_action_callback, 0)
 
     def setup_perceptions(self, perceptions):
         """
@@ -819,7 +819,7 @@ class LTMSim(Node):
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
             else:
-                self.perceptions[sid].data = 0
+                self.perceptions[sid].data = False
             self.get_logger().info("I will publish to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0) #TODO: ¿latch in ROS2?
 

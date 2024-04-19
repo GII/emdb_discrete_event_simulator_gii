@@ -268,7 +268,7 @@ class LTMSim(Node):
         elif y_coord > 0.75:
             y_coord = 0.75
         new_dist = numpy.linalg.norm([y_coord, x_coord])
-        return new_dist, 0
+        return new_dist, 0.0
     
     def send_object_outofreach(self, ang):
         """

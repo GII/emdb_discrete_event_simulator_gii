@@ -208,7 +208,7 @@ class LTMSim(Node):
             )
         else:
             too_far = dist > self.normal_outer(abs(ang))
-        return too_far
+        return bool(too_far)
 
     def object_too_close(self, dist, ang):
         """

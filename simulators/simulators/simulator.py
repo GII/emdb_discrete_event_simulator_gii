@@ -7,6 +7,7 @@ import yamlloader
 import numpy
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 from core.service_client import ServiceClient
 
@@ -69,31 +70,36 @@ class LTMSim(Node):
             )
         )
 
+        self.cbgroup_server=MutuallyExclusiveCallbackGroup()
+        self.cbgroup_client=MutuallyExclusiveCallbackGroup()
+
         self.calculate_closest_position_service = self.create_service(
             CalculateClosestPosition,
             "simulator/calculate_closest_position",
-            self.calculate_closest_position_callback
+            self.calculate_closest_position_callback, 
+            callback_group= self.cbgroup_server
         )
 
         self.object_pickable_with_two_hands_service = self.create_service(
             ObjectPickableWithTwoHands,
             "simulator/object_pickable_with_two_hands",
-            self.object_pickable_with_two_hands_callback
+            self.object_pickable_with_two_hands_callback,
+            callback_group= self.cbgroup_server
         )
 
         self.object_too_far_service = self.create_service(
             ObjectTooFar,
             "simulator/object_too_far",
-            self.object_too_far_callback
+            self.object_too_far_callback,
+            callback_group= self.cbgroup_server
         )
+
+        self.load_client=ServiceClient(LoadConfig, 'commander/load_config')
 
         self.load_config_file_in_commander()
 
     def load_config_file_in_commander(self):
-        service_name = 'commander/load_config'
-        load_client = ServiceClient(LoadConfig, service_name)
-        loaded = load_client.send_request(file = self.config_file)
-        load_client.destroy_node()
+        loaded = self.load_client.send_request(file = self.config_file)
         return loaded
 
     def calculate_closest_position_callback(self, request, response):

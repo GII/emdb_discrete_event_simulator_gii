@@ -752,7 +752,7 @@ class LTMSim(Node):
         :param data: The message that contais the command received
         :type data: ROS msg defined in setup_control_channel
         """
-        self.get_logger().info("Command received...")
+        self.get_logger().info(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
             self.last_reset_iteration = data.iteration
             self.world = World[data.world]

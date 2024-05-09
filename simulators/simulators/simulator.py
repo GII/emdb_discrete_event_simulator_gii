@@ -94,11 +94,11 @@ class LTMSim(Node):
             callback_group= self.cbgroup_server
         )
 
-        self.load_client=ServiceClient(LoadConfig, 'commander/load_config')
+        self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
 
-        self.load_config_file_in_commander()
+        self.load_experiment_file_in_commander()
 
-    def load_config_file_in_commander(self):
+    def load_experiment_file_in_commander(self):
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
 

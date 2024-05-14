@@ -96,7 +96,7 @@ class LTMSim(Node):
 
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
 
-        self.load_experiment_file_in_commander()
+        
 
     def load_experiment_file_in_commander(self):
         loaded = self.load_client.send_request(file = self.config_file)
@@ -859,6 +859,8 @@ class LTMSim(Node):
             self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
         else:
             self.rng = numpy.random.default_rng()
+        
+        self.load_experiment_file_in_commander()
 
 def main(args=None):
     rclpy.init(args=args)

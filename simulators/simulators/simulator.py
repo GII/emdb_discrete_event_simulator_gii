@@ -7,6 +7,7 @@ import yamlloader
 import numpy
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 from core.service_client import ServiceClient
@@ -752,13 +753,13 @@ class LTMSim(Node):
         :param data: The message that contais the command received
         :type data: ROS msg defined in setup_control_channel
         """
-        self.get_logger().info(f"Command received... ITERATION: {data.iteration}")
+        self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
             self.last_reset_iteration = data.iteration
             self.world = World[data.world]
             self.random_perceptions()
             for ident, publisher in self.sim_publishers.items():
-                self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+                self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
                 publisher.publish(self.perceptions[ident])
             if (not self.catched_object) and (
                 self.perceptions["ball_in_left_hand"].data
@@ -780,7 +781,7 @@ class LTMSim(Node):
         getattr(self, data.data + "_policy")()
         self.update_reward_sensor()
         for ident, publisher in self.sim_publishers.items():
-            self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
         if (not self.catched_object) and (
             self.perceptions["ball_in_left_hand"].data
@@ -866,8 +867,13 @@ def main(args=None):
     rclpy.init(args=args)
     sim = LTMSim()
     sim.load_configuration()
-    rclpy.spin(sim)
-    sim.destroy_node()
+
+    try:
+        rclpy.spin(sim)
+    except KeyboardInterrupt:
+        print('Keyboard Interrupt Detected: Shutting down simulator...')
+    finally:
+        sim.destroy_node()
 
 if __name__ == '__main__':
     main()       

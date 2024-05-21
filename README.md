@@ -53,7 +53,7 @@ The reward obtained could be 0.2, 0.3 or 0.6 if the robot with its action improv
 
 ## Configure an experiment
 
-There is possible to configure the simulator editing the default experiment configuration file, stored in the [_emdb_experiments_gii_](https://github.com/GII/emdb_experiments_gii) repository (experiments/default_experiment.yaml), or one created by oneself:
+There is possible to configure the simulator by editing the default experiment configuration file, stored in the [_emdb_experiments_gii_](https://github.com/GII/emdb_experiments_gii) repository (experiments/default_experiment.yaml), or one created by oneself:
 ```
 SimulatedBaxter:
     Perceptions:

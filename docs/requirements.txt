@@ -3,3 +3,4 @@ sphinx-rtd-theme
 myst_parser
 readthedocs-sphinx-search
 yamlloader
+numpy

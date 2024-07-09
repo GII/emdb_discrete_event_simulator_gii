@@ -758,9 +758,7 @@ class LTMSim(Node):
             self.last_reset_iteration = data.iteration
             self.world = World[data.world]
             self.random_perceptions()
-            for ident, publisher in self.sim_publishers.items():
-                self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
-                publisher.publish(self.perceptions[ident])
+            self.publish_perceptions()
             if (not self.catched_object) and (
                 self.perceptions["ball_in_left_hand"].data
                 or self.perceptions["ball_in_right_hand"].data
@@ -769,6 +767,11 @@ class LTMSim(Node):
         elif data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
+
+    def publish_perceptions(self):
+        for ident, publisher in self.sim_publishers.items():
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            publisher.publish(self.perceptions[ident])
 
     def new_action_callback(self, data):
         """
@@ -780,15 +783,35 @@ class LTMSim(Node):
         self.get_logger().info("Executing policy " + str(data.data))
         getattr(self, data.data + "_policy")()
         self.update_reward_sensor()
-        for ident, publisher in self.sim_publishers.items():
-            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
-            publisher.publish(self.perceptions[ident])
+        self.publish_perceptions()
         if (not self.catched_object) and (
             self.perceptions["ball_in_left_hand"].data
             or self.perceptions["ball_in_right_hand"].data
         ):
             self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
             rclpy.shutdown()
+
+    def new_action_service_callback(self, request, response):
+        """
+        Execute a policy and publish new perceptions.
+
+        :param request: The message that contains the policy to execute
+        :type request: ROS srv defined in setup_control_channel
+        :param response: Response of the success of the execution of the action
+        :type response: ROS srv defined in setup_control_channel
+        """
+        self.get_logger().info("Executing policy " + str(request.policy))
+        getattr(self, request.policy + "_policy")()
+        self.update_reward_sensor()
+        self.publish_perceptions()
+        if (not self.catched_object) and (
+            self.perceptions["ball_in_left_hand"].data
+            or self.perceptions["ball_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            rclpy.shutdown()
+        response.success = True
+        return response
 
     def setup_control_channel(self, simulation):
         """
@@ -803,11 +826,19 @@ class LTMSim(Node):
         message = class_from_classname(classname)
         self.get_logger().info("Subscribing to... " + str(topic))
         self.create_subscription(message, topic, self.new_command_callback, 0)
-        topic = simulation["executed_policy_topic"]
+        topic = simulation.get("executed_policy_topic")
+        service = simulation.get("executed_policy_service")
         classname = simulation["executed_policy_msg"]
         message = class_from_classname(classname)
-        self.get_logger().info("Subscribing to... " + str(topic))
-        self.create_subscription(message, topic, self.new_action_callback, 0)
+        if topic:
+            self.get_logger().info("Subscribing to... " + str(topic))
+            self.create_subscription(message, topic, self.new_action_callback, 0)
+        if service:
+            self.get_logger().info("Creating server... " + str(service))
+            self.create_service(message, service, self.new_action_service_callback, callback_group=self.cbgroup_server)
+            self.get_logger().info("Creating perception publisher timer... ")
+            self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
+            
 
     def setup_perceptions(self, perceptions):
         """

@@ -1,6 +1,6 @@
-=========
-Simulator
-=========
+=================
+API Documentation
+=================
 
 .. automodule:: simulators.simulator
     :members:

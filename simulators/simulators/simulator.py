@@ -173,6 +173,9 @@ class LTMSim(Node):
         """
         return abs(ang) <= 0.3925 and 0.46 <= dist <= 0.75
     
+    def object_pickable(self):
+        return self.object_too_close() or self.object_too_far()
+    
     def object_too_far_callback(self, request, response):
         """
         The callback to calculate if and object is out of range of the robot
@@ -189,6 +192,39 @@ class LTMSim(Node):
         too_far = self.object_too_far(dist, ang)
         response.too_far = too_far
         return response
+    
+    def object_held_with_left_hand(self):
+        """
+        Check if an object is held with the left hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.perception['ball_in_left_hand'].data
+
+    def object_held_with_right_hand(self):
+        """
+        Check if an object is held with the right hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.perception['ball_in_right_hand'].data
+
+    def object_held(self):
+        """
+        Check if an object is held with one hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.object_held_with_left_hand() or self.object_held_with_right_hand()
     
     
     def object_too_far(self, dist, ang):
@@ -395,6 +431,23 @@ class LTMSim(Node):
                     return True
         return False
     
+    def progress_ball_in_box(self):
+        progress = 0.0
+        if self.object_in_close_box() or self.object_in_far_box():
+            progress = 1.0
+        elif self.object_held():
+            if self.object_held_with_two_hands():
+                progress=0.6
+            elif self.ball_and_box_on_the_same_side():
+                progress=0.6
+            else:
+                progress=0.3
+        elif self.object_pickable_with_two_hands():
+            progress=0.3
+        elif self.object_pickable():
+            progress=0.2
+        
+        return progress   
 
     def reward_ball_with_robot(self):
         """
@@ -838,6 +891,7 @@ class LTMSim(Node):
             self.create_service(message, service, self.new_action_service_callback, callback_group=self.cbgroup_server)
             self.get_logger().info("Creating perception publisher timer... ")
             self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
+            self.goal_progress_timer = self.create_timer(0.01, self.publish_progress, callback_group=self.cbgroup_server)
             
 
     def setup_perceptions(self, perceptions):

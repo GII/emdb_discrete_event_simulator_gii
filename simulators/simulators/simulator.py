@@ -202,7 +202,7 @@ class LTMSim(Node):
         :return: A value that indicates if the object is held or not
         :rtype: bool
         """
-        return self.perception['ball_in_left_hand'].data
+        return self.perceptions['ball_in_left_hand'].data
 
     def object_held_with_right_hand(self):
         """
@@ -213,7 +213,7 @@ class LTMSim(Node):
         :return: A value that indicates if the object is held or not
         :rtype: bool
         """
-        return self.perception['ball_in_right_hand'].data
+        return self.perceptions['ball_in_right_hand'].data
 
     def object_held(self):
         """
@@ -226,7 +226,71 @@ class LTMSim(Node):
         """
         return self.object_held_with_left_hand() or self.object_held_with_right_hand()
     
+    def object_held_with_two_hands(self):
+        """
+        Check if an object is held with two hands.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return (
+            self.object_held_with_left_hand()
+            and self.object_held_with_right_hand()
+        )
     
+    def ball_and_box_on_the_same_side(self):
+        """
+        Check if an object and a box are on the same side.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is in the same side or not
+        :rtype: bool
+        """
+        same_side = False
+        for box in self.perceptions["boxes"].data:
+            same_side = (self.perceptions['ball_in_left_hand'].data and box.angle > 0) or (
+                self.perceptions['ball_in_right_hand'].data and not (box.angle > 0)
+            )
+            if same_side:
+                break
+        return same_side
+    
+    def check_object_pickable_with_two_hands(self):
+        """
+        Check if an object can be hold with two hands.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object can be hold or not
+        :rtype: bool
+        """
+        pickable = False
+        for cylinder in self.perceptions["cylinders"].data:
+            pickable = (self.object_pickable_with_two_hands(cylinder.distance, cylinder.angle)) and not self.object_held()
+            if pickable:
+                break
+        return pickable
+    
+    def check_object_pickable(self):
+        """
+        Check if an object is within the robot's reachable area.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object can be moved or not
+        :rtype: bool
+        """        
+        pickable = False
+        for cylinder in self.perceptions["cylinders"].data:
+            pickable = not (self.object_too_far(cylinder.distance, cylinder.angle) or self.object_too_close(cylinder.distance, cylinder.angle))
+            if pickable:
+                break
+        return pickable
+
+
     def object_too_far(self, dist, ang):
         """
         Return True if the object is out of range of the robot.
@@ -423,17 +487,17 @@ class LTMSim(Node):
         :return: True if there is reward or False if not
         :rtype: bool
         """
-        self.perceptions["ball_in_box"].data = False
+        #self.perceptions["ball_in_box"].data = False
         for cylinder in self.perceptions["cylinders"].data:
             for box in self.perceptions["boxes"].data:
                 if (cylinder.distance == box.distance) and (cylinder.angle == box.angle):
-                    self.perceptions["ball_in_box"].data = True
+                    #self.perceptions["ball_in_box"].data = True
                     return True
         return False
     
-    def progress_ball_in_box(self):
-        progress = 0.0
-        if self.object_in_close_box() or self.object_in_far_box():
+    def reward_progress_ball_in_box(self):
+        progress=0.0
+        if self.reward_ball_in_box():
             progress = 1.0
         elif self.object_held():
             if self.object_held_with_two_hands():
@@ -442,12 +506,12 @@ class LTMSim(Node):
                 progress=0.6
             else:
                 progress=0.3
-        elif self.object_pickable_with_two_hands():
+        elif self.check_object_pickable_with_two_hands():
             progress=0.3
-        elif self.object_pickable():
+        elif self.check_object_pickable():
             progress=0.2
         
-        return progress   
+        self.perceptions['progress_ball_in_box'].data = progress 
 
     def reward_ball_with_robot(self):
         """
@@ -891,7 +955,7 @@ class LTMSim(Node):
             self.create_service(message, service, self.new_action_service_callback, callback_group=self.cbgroup_server)
             self.get_logger().info("Creating perception publisher timer... ")
             self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
-            self.goal_progress_timer = self.create_timer(0.01, self.publish_progress, callback_group=self.cbgroup_server)
+            #self.goal_progress_timer = self.create_timer(0.01, self.publish_progress, callback_group=self.cbgroup_server)
             
 
     def setup_perceptions(self, perceptions):
@@ -910,6 +974,8 @@ class LTMSim(Node):
             if "List" in classname:
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            elif "Float" in classname:
+                self.perceptions[sid].data = 0.0
             else:
                 self.perceptions[sid].data = False
             self.get_logger().info("I will publish to... " + str(topic))

@@ -511,6 +511,7 @@ class LTMSim(Node):
         elif self.check_object_pickable():
             progress=0.2
         
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}")
         self.perceptions['progress_ball_in_box'].data = progress 
 
     def reward_ball_with_robot(self):
@@ -872,10 +873,12 @@ class LTMSim(Node):
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
+            self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
             self.last_reset_iteration = data.iteration
             self.world = World[data.world]
             self.random_perceptions()
             self.publish_perceptions()
+            self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
             if (not self.catched_object) and (
                 self.perceptions["ball_in_left_hand"].data
                 or self.perceptions["ball_in_right_hand"].data

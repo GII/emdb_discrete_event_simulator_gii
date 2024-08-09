@@ -269,7 +269,7 @@ class LTMSim(Node):
         """
         pickable = False
         for cylinder in self.perceptions["cylinders"].data:
-            pickable = (self.object_pickable_with_two_hands(cylinder.distance, cylinder.angle)) and not self.object_held()
+            pickable = (self.object_pickable_with_two_hands(cylinder.distance, cylinder.angle)) and not self.object_held() and not self.object_is_small(cylinder.diameter)
             if pickable:
                 break
         return pickable

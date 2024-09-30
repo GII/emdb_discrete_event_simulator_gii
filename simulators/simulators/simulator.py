@@ -514,6 +514,14 @@ class LTMSim(Node):
         self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}")
         self.perceptions['progress_ball_in_box'].data = progress 
 
+    def reward_ball_in_box_goal(self):
+        progress=0.0
+        if self.reward_ball_in_box():
+            progress = 1.0
+        
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}")
+        self.perceptions['ball_in_box_goal'].data = progress 
+
     def reward_ball_with_robot(self):
         """
         Reward for object with robot goal.

@@ -511,16 +511,17 @@ class LTMSim(Node):
         elif self.check_object_pickable():
             progress=0.2
         
-        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}")
-        self.perceptions['progress_ball_in_box'].data = progress 
+        
+        self.perceptions['progress_ball_in_box'].data = progress
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}") 
 
     def reward_ball_in_box_goal(self):
         progress=0.0
         if self.reward_ball_in_box():
             progress = 1.0
         
-        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}")
-        self.perceptions['ball_in_box_goal'].data = progress 
+        self.perceptions['ball_in_box_goal'].data = progress
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}") 
 
     def reward_ball_with_robot(self):
         """

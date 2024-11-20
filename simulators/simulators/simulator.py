@@ -871,6 +871,19 @@ class LTMSim(Node):
                         distance = self.normal_outer(abs(cylinder.angle))
                     cylinder.distance = self.avoid_reward_by_chance(distance - 0.1, cylinder.angle)
                     break
+    
+    def reset_world(self, data):
+        self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
+        self.last_reset_iteration = data.iteration
+        self.world = World[data.world]
+        self.random_perceptions()
+        self.publish_perceptions()
+        self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
+        if (not self.catched_object) and (
+            self.perceptions["ball_in_left_hand"].data
+            or self.perceptions["ball_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
 
     
     def new_command_callback(self, data):
@@ -882,17 +895,7 @@ class LTMSim(Node):
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
-            self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
-            self.last_reset_iteration = data.iteration
-            self.world = World[data.world]
-            self.random_perceptions()
-            self.publish_perceptions()
-            self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
-            if (not self.catched_object) and (
-                self.perceptions["ball_in_left_hand"].data
-                or self.perceptions["ball_in_right_hand"].data
-            ):
-                self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            self.reset_world(data)
         elif data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
@@ -901,6 +904,11 @@ class LTMSim(Node):
         for ident, publisher in self.sim_publishers.items():
             self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
+
+    def world_reset_service_callback(self, request, response):
+        self.reset_world(request)
+        response.success=True
+        return response
 
     def new_action_callback(self, data):
         """
@@ -944,7 +952,7 @@ class LTMSim(Node):
 
     def setup_control_channel(self, simulation):
         """
-        Configure the ROS topic where listen for commands to be executed.
+        Configure the ROS topic/service where listen for commands to be executed.
 
         :param simulation: The params from the config file to setup the control channel
         :type simulation: dict
@@ -956,18 +964,23 @@ class LTMSim(Node):
         self.get_logger().info("Subscribing to... " + str(topic))
         self.create_subscription(message, topic, self.new_command_callback, 0)
         topic = simulation.get("executed_policy_topic")
-        service = simulation.get("executed_policy_service")
-        classname = simulation["executed_policy_msg"]
-        message = class_from_classname(classname)
+        service_policy = simulation.get("executed_policy_service")
+        service_world_reset = simulation.get("world_reset_service")
+
         if topic:
             self.get_logger().info("Subscribing to... " + str(topic))
             self.create_subscription(message, topic, self.new_action_callback, 0)
-        if service:
-            self.get_logger().info("Creating server... " + str(service))
-            self.create_service(message, service, self.new_action_service_callback, callback_group=self.cbgroup_server)
+        if service_policy:
+            self.get_logger().info("Creating server... " + str(service_policy))
+            classname = simulation["executed_policy_msg"]
+            message_policy_srv = class_from_classname(classname)
+            self.create_service(message_policy_srv, service_policy, self.new_action_service_callback, callback_group=self.cbgroup_server)
             self.get_logger().info("Creating perception publisher timer... ")
             self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
-            #self.goal_progress_timer = self.create_timer(0.01, self.publish_progress, callback_group=self.cbgroup_server)
+        if service_world_reset:
+            classname= simulation["executed_policy_msg"]
+            self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
             
 
     def setup_perceptions(self, perceptions):

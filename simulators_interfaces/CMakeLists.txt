@@ -12,6 +12,8 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Object2DListMsg.msg"
+  "msg/Object2DMsg.msg"
   "msg/ObjectListMsg.msg"
   "msg/ObjectMsg.msg"
   "srv/CalculateClosestPosition.srv"

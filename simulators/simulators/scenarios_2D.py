@@ -4,8 +4,9 @@ from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
 from scipy.spatial import distance
-import numbers
+from numpy.random import Generator
 
+import numbers
 import time
 import random
 
@@ -222,6 +223,7 @@ class Sim(object):
         self.world_rules()
         if self.visualize:
             self.fig.canvas.draw()
+            plt.pause(0.01)
 
     def world_rules(self):
         """Placeholder method: Implement the desired world logic according to the desired scenario"""
@@ -316,13 +318,22 @@ class Baxter2Arms(Sim):
         self.world_rules()
         if self.visualize:
             self.fig.canvas.draw()
+            plt.pause(0.001)
     
-    def get_close_object(self, robot:Robot, threshold=20):        
+    def get_close_object(self, entity:Entity, threshold=20):        
         for object in self.objects:
-            dist=distance.euclidean(robot.get_pos(), object.get_pos())
+            dist=distance.euclidean(entity.get_pos(), object.get_pos())
             if dist<=threshold:
                 return object
         return None
+
+    def get_close_objects(self, entity:Entity, threshold=20):
+        objects=[]        
+        for object in self.objects:
+            dist=distance.euclidean(entity.get_pos(), object.get_pos())
+            if dist<=threshold:
+                objects.append(object)
+        return objects
 
 
 
@@ -390,6 +401,7 @@ class SimpleScenario(Baxter2Arms):
         
         # Show figure and patches
         self.plot_entities()
+        plt.pause(0.001)
 
     def world_rules(self):
         """Establish the ball position in the scenario"""
@@ -411,11 +423,26 @@ class SimpleScenario(Baxter2Arms):
             if not robot.gripper_state and robot.catched_object:
                 robot.catched_object.catched_by=None
                 robot.catched_object=None
+
+            #Check if something is in the box
+            objs_close=self.get_close_objects(self.box1, threshold=50)
+            self.box1.contents=[]
+            for obj in objs_close:
+                if not obj.catched_by:
+                    self.box1.contents.append(obj)
+
         #Update position of grasped objects
         for object in self.objects:
             if object.catched_by:
                 pose=object.catched_by.get_pos()
                 object.set_pos(pose[0], pose[1])
+
+    def restart_scenario(self, rng:Generator):
+        self.baxter_left.set_pos(rng.uniform(self.baxter_left_limits[0][0], self.baxter_left_limits[0][1]), rng.uniform(self.baxter_left_limits[1][0], self.baxter_left_limits[1][1]))
+        self.baxter_right.set_pos(rng.uniform(self.baxter_right_limts[0][0], self.baxter_right_limts[0][1]), rng.uniform(self.baxter_right_limts[1][0], self.baxter_right_limts[1][1])) 
+        self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+        for object in self.objects:
+            object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
 
         
     
@@ -432,6 +459,6 @@ if __name__ == '__main__':
         grp_l=bool(random.getrandbits(1))
         grp_r=bool(random.getrandbits(1))
         a.apply_action(ang_l, ang_r, vel_l, vel_r, grp_l, grp_r)
-        plt.pause(0.1)
+        plt.pause(0.01)
 
 

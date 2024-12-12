@@ -39,7 +39,7 @@ class Entity:
         self.update_visual()
     
     def set_angle(self, angle):
-        self.angle=angle
+        self.angle=((angle+180)%360)-180 #Bounded in range [-180, 180]
         self.update_visual()
 
     def set_color(self, color):

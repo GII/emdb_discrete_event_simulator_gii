@@ -219,7 +219,7 @@ class IJCNNSim(Node):
             self.get_logger().info("STAGE 1 REWARD: TEST FRUIT")
             if self.fruit_tested:
                 reward = 1.0
-        self.perceptions["iteration_dependent_goal"].data = reward
+        self.perceptions["test_fruit_goal"].data = reward
 
     def reward_classify_fruit_goal(self):
         reward = 0.0
@@ -227,7 +227,7 @@ class IJCNNSim(Node):
             self.get_logger().info("STAGE 2 REWARD: CLASSIFY FRUIT")
             if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
                 reward = 1.0
-        self.perceptions["iteration_dependent_goal"].data = reward
+        self.perceptions["classify_fruit_goal"].data = reward
 
     def reset_world(self, data):
         self.get_logger().info("Resetting world...")

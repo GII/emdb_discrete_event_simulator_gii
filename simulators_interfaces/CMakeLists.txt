@@ -12,6 +12,8 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/FruitListMsg.msg"
+  "msg/FruitMsg.msg"
   "msg/Object2DListMsg.msg"
   "msg/Object2DMsg.msg"
   "msg/ObjectListMsg.msg"

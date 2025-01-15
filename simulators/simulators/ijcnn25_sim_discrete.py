@@ -125,7 +125,6 @@ class IJCNNSim(Node):
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
 
-            #self.perceive_closest_fruit() #TODO Necesario?
             self.catched_fruit = self.closest_fruit
     
     def change_hands_policy(self):
@@ -288,8 +287,7 @@ class IJCNNSim(Node):
         #self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
         signo = (self.perceptions["scales"].data[0].angle * self.perceptions["fruits"].data[0].angle) > 0
-        self.get_logger().info(f"OPA RACING: {signo}")
-        self.perceive_closest_fruit() # TODO Necesario antes y despues?
+        self.perceive_closest_fruit()
         self.get_logger().info(f"FRUITS BEFORE POLICY: {self.fruits}")
         self.get_logger().info(f"CATCHED FRUIT BEFORE: {self.catched_fruit}")
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")

@@ -18,6 +18,7 @@ class IJCNNSim(Node):
         self.base_messages = {}
         self.perceptions = {}
         self.sim_publishers = {}
+
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
         self.fruits = []
@@ -95,7 +96,6 @@ class IJCNNSim(Node):
 
     def random_perceptions(self):
         self.catched_fruit = None
-        self.get_logger().info("FORZA DEPOR")
         # Generate fruits
         n_fruits = self.rng.integers(0,4)
         self.perceptions["fruits"].data = []
@@ -114,7 +114,7 @@ class IJCNNSim(Node):
         self.perceptions["fruit_in_right_hand"].data = False
         self.perceptions["fruit_in_left_hand"].data = False
 
-        self.perceptions["button_light"].data = False
+        self.perceptions["button_light"].data = False if self.rng.uniform() > 0.5 else True
 
         self.update_reward_sensor()
     
@@ -208,7 +208,23 @@ class IJCNNSim(Node):
             if self.fruit_tested:
                 reward = 1.0
         else:
-            self.get_logger().info("STAGE 2 REWARD: CLASIFICATE FRUIT")
+            self.get_logger().info("STAGE 2 REWARD: CLASSIFY FRUIT")
+            if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
+                reward = 1.0
+        self.perceptions["iteration_dependent_goal"].data = reward
+
+    def reward_test_fruit_goal(self):
+        reward = 0.0
+        if self.iteration <= self.change_reward_iterations[0]:
+            self.get_logger().info("STAGE 1 REWARD: TEST FRUIT")
+            if self.fruit_tested:
+                reward = 1.0
+        self.perceptions["iteration_dependent_goal"].data = reward
+
+    def reward_classify_fruit_goal(self):
+        reward = 0.0
+        if self.iteration > self.change_reward_iterations[0]:
+            self.get_logger().info("STAGE 2 REWARD: CLASSIFY FRUIT")
             if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
                 reward = 1.0
         self.perceptions["iteration_dependent_goal"].data = reward

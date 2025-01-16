@@ -212,7 +212,7 @@ class IJCNNSim(Node):
         
         elif not self.catched_fruit and fruit.state == 0:
             if abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
-                abs(fruit.distance) == abs(self.fruit_left_side_pos["distance"])) and (
+                fruit.distance == self.fruit_left_side_pos["distance"]) and (
                     fruit.angle * scale.angle > 0
                 ):
                 progress = 0.250
@@ -220,16 +220,18 @@ class IJCNNSim(Node):
         elif not self.catched_fruit and fruit.state != 0:
             if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
                 progress = 1.0
-            elif abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
-            abs(fruit.distance) == abs(self.fruit_left_side_pos["distance"])) and (
-                fruit.angle * scale.angle > 0
-            ):
+            elif ((fruit.angle == self.fruit_left_side_pos["angle"]) and fruit.state == 1) and (
+                (fruit.angle == self.fruit_right_side_pos["angle"]) and fruit.state == 2) and (
+                    fruit.distance == self.fruit_left_side_pos["distance"]
+                ):
                 progress = 0.750
             elif self.fruit_tested:
                 progress = 0.500
         
         elif self.catched_fruit and fruit.state != 0:
-            if (fruit.angle * scale.angle) > 0:
+            if ((fruit.angle * self.accepted_fruit_pos['angle'] > 0) and fruit.state == 1) or (
+                (fruit.angle * self.rejected_fruit_pos['angle'] > 0) and fruit.state == 2
+            ):
                 progress = 0.875
             else:
                 progress = 0.625

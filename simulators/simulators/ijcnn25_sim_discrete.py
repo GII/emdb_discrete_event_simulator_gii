@@ -180,7 +180,6 @@ class IJCNNSim(Node):
                 self.perceptions["fruit_in_left_hand"].data = False
                 if self.catched_fruit["state"] == 1:
                     self.fruit_correctly_accepted = True
-                self.fruits.remove(self.catched_fruit)
                 self.catched_fruit = None
     
     def discard_fruit_policy(self):
@@ -191,7 +190,6 @@ class IJCNNSim(Node):
                 self.perceptions["fruit_in_right_hand"].data = False
                 if self.catched_fruit["state"] == 2:
                     self.fruit_correctly_rejected = True
-                self.fruits.remove(self.catched_fruit)
                 self.catched_fruit = None
     
     def press_button_policy(self):
@@ -218,6 +216,11 @@ class IJCNNSim(Node):
             self.get_logger().info("STAGE 1 REWARD: TEST FRUIT")
             if self.fruit_tested:
                 reward = 1.0
+        else:
+            self.get_logger().info("STAGE 2 REWARD: TEST FRUIT")
+            if self.fruit_tested:
+                reward = 0.9 #TEST
+
         self.perceptions["test_fruit_goal"].data = reward
 
     def reward_classify_fruit_goal(self):

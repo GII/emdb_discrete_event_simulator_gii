@@ -23,6 +23,7 @@ class IJCNNSim(Node):
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
         self.fruits = []
         self.catched_fruit = None
+        self.tested_fruit = None
 
         self.normal_inner = numpy.poly1d(
         numpy.polyfit([0.0, 0.3925, 0.785, 1.1775, 1.57], [0.45, 0.47, 0.525, 0.65, 0.9], 3)
@@ -38,7 +39,6 @@ class IJCNNSim(Node):
         self.fruit_right_side_pos = {"distance":0.8, "angle":5*(numpy.pi/360)}
         self.fruit_left_side_pos = {"distance":0.8, "angle":-5*(numpy.pi/360)}
 
-        self.fruit_tested = False
         self.fruit_correctly_accepted = False
         self.fruit_correctly_rejected = False
 
@@ -75,11 +75,12 @@ class IJCNNSim(Node):
         for _ in range(n_fruits):
             distance, angle = self.random_position(self.collection_area)
             dim_max = self.rng.uniform(low=0.03, high=0.1)
-            fruit = dict(distance = distance, angle = angle, dim_max = dim_max, state = 0)
+            fruit = dict(distance = distance, angle = angle, dim_max = dim_max)
             self.fruits.append(fruit)
 
 
     def perceive_closest_fruit(self):
+        self.get_logger().info("Perceiving closes fruits...")
         if self.fruits:
             distances = numpy.array([fruit["distance"] for fruit in self.fruits])
             closest_fruit_index = numpy.argmin(distances)
@@ -87,12 +88,10 @@ class IJCNNSim(Node):
             self.perceptions["fruits"].data[0].distance = self.closest_fruit["distance"]
             self.perceptions["fruits"].data[0].angle = self.closest_fruit["angle"]
             self.perceptions["fruits"].data[0].dim_max = self.closest_fruit["dim_max"]
-            self.perceptions["fruits"].data[0].state = self.closest_fruit["state"]
         else:
             self.perceptions["fruits"].data[0].distance = 1.9
             self.perceptions["fruits"].data[0].angle = 1.4
             self.perceptions["fruits"].data[0].dim_max = 0.1
-            self.perceptions["fruits"].data[0].state = 0
 
     def random_perceptions(self):
         self.catched_fruit = None
@@ -111,6 +110,8 @@ class IJCNNSim(Node):
         distance, angle = self.random_position(self.weighing_area)
         self.perceptions["scales"].data[0].distance = distance
         self.perceptions["scales"].data[0].angle = angle
+        self.perceptions["scales"].data[0].state = 0
+        self.perceptions["scales"].data[0].active = False
 
         self.perceptions["fruit_in_right_hand"].data = False
         self.perceptions["fruit_in_left_hand"].data = False
@@ -120,12 +121,21 @@ class IJCNNSim(Node):
         self.update_reward_sensor()
     
     def pick_fruit_policy(self):
+        scale = self.perceptions["scales"].data[0]
         if not self.catched_fruit and self.fruits:
             if self.closest_fruit["angle"] > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
-
+            if scale.active:
+                scale.active = False
+                scale.state = 0
+                if self.closest_fruit == self.tested_fruit:
+                    self.tested_fruit = None
+                else:
+                    raise RuntimeError("The tested fruit should be the closest fruit!!")
+            self.fruit_correctly_rejected = False
+            self.fruit_correctly_accepted = False
             self.catched_fruit = self.closest_fruit
     
     def change_hands_policy(self):
@@ -162,11 +172,12 @@ class IJCNNSim(Node):
                 self.perceptions["fruit_in_right_hand"].data and scale.angle > 0.0):
                 self.catched_fruit["distance"] = scale.distance
                 self.catched_fruit["angle"] = scale.angle
-                self.catched_fruit["state"] = 1 if self.rng.uniform() > 0.5 else 2
+                scale.active = True
+                scale.state = 1 if self.rng.uniform() > 0.5 else 2
                 self.perceptions["fruit_in_left_hand"].data = False
                 self.perceptions["fruit_in_right_hand"].data = False
+                self.tested_fruit = self.catched_fruit
                 self.catched_fruit = None
-                self.fruit_tested = True
 
     def ask_nicely_policy(self):
         if not self.fruits:
@@ -174,24 +185,41 @@ class IJCNNSim(Node):
             self.generate_fruits(n_fruits)
 
     def accept_fruit_policy(self):
-        if self.catched_fruit:
+        scale = self.perceptions["scales"].data[0]
+        if scale.active:
+            self.tested_fruit["distance"] = self.accepted_fruit_pos["distance"]
+            self.tested_fruit["angle"] = self.accepted_fruit_pos["angle"]
+            if scale.state == 1:
+                self.fruit_correctly_accepted = True
+            scale.active = False
+            scale.state = 0
+            self.tested_fruit = None
+
+        elif self.catched_fruit:
             if self.perceptions["fruit_in_left_hand"].data:
                 self.catched_fruit["distance"] = self.accepted_fruit_pos["distance"]
                 self.catched_fruit["angle"] = self.accepted_fruit_pos["angle"]
                 self.perceptions["fruit_in_left_hand"].data = False
-                if self.catched_fruit["state"] == 1:
-                    self.fruit_correctly_accepted = True
                 self.catched_fruit = None
+
     
     def discard_fruit_policy(self):
-        if self.catched_fruit:
+        scale = self.perceptions["scales"].data[0]
+        if scale.active:
+            self.tested_fruit["distance"] = self.rejected_fruit_pos["distance"]
+            self.tested_fruit["angle"] = self.rejected_fruit_pos["angle"]
+            if scale.state == 2:
+                self.fruit_correctly_rejected = True
+            scale.active = False
+            scale.state = 0
+            self.tested_fruit = None
+        elif self.catched_fruit:
             if self.perceptions["fruit_in_right_hand"].data:
                 self.catched_fruit["distance"] = self.rejected_fruit_pos["distance"]
                 self.catched_fruit["angle"] = self.rejected_fruit_pos["angle"]
                 self.perceptions["fruit_in_right_hand"].data = False
-                if self.catched_fruit["state"] == 2:
-                    self.fruit_correctly_rejected = True
                 self.catched_fruit = None
+
     
     def press_button_policy(self):
         if self.perceptions["button_light"].data:
@@ -204,37 +232,27 @@ class IJCNNSim(Node):
         fruit = self.perceptions["fruits"].data[0]
         progress = 0.0
 
-        if self.catched_fruit and fruit.state == 0:
-            if (fruit.angle * scale.angle) > 0:
-                progress = 0.375
-            else:
-                progress = 0.125
+        if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
+            progress = 1.0
         
-        elif not self.catched_fruit and fruit.state == 0:
+        elif scale.active==True:
+            progress = 0.75
+        
+        elif self.catched_fruit:
+            if (fruit.angle * scale.angle) > 0:
+                progress = 0.5
+            else:
+                progress = 0.250
+        
+        elif not self.catched_fruit:
             if abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
                 fruit.distance == self.fruit_left_side_pos["distance"]) and (
                     fruit.angle * scale.angle > 0
                 ):
-                progress = 0.250
-
-        elif not self.catched_fruit and fruit.state != 0:
-            if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
-                progress = 1.0
-            elif ((fruit.angle == self.fruit_left_side_pos["angle"]) and fruit.state == 1) and (
-                (fruit.angle == self.fruit_right_side_pos["angle"]) and fruit.state == 2) and (
-                    fruit.distance == self.fruit_left_side_pos["distance"]
-                ):
-                progress = 0.750
-            elif self.fruit_tested:
-                progress = 0.500
+                progress = 0.375
         
-        elif self.catched_fruit and fruit.state != 0:
-            if ((fruit.angle * self.accepted_fruit_pos['angle'] > 0) and fruit.state == 1) or (
-                (fruit.angle * self.rejected_fruit_pos['angle'] > 0) and fruit.state == 2
-            ):
-                progress = 0.875
-            else:
-                progress = 0.625
+            elif self.fruits:
+                progress = 0.125
 
         self.perceptions["progress_classify_fruit_goal"].data = progress
 
@@ -242,8 +260,9 @@ class IJCNNSim(Node):
     def reward_iteration_dependent_goal(self):
         reward = 0.0
         if self.iteration <= self.change_reward_iterations[0]:
+            scale = self.perceptions["scales"].data[0]
             self.get_logger().info("STAGE 1 REWARD: TEST FRUIT")
-            if self.fruit_tested:
+            if scale.active:
                 reward = 1.0
         else:
             self.get_logger().info("STAGE 2 REWARD: CLASSIFY FRUIT")
@@ -253,13 +272,14 @@ class IJCNNSim(Node):
 
     def reward_test_fruit_goal(self):
         reward = 0.0
+        scale = self.perceptions["scales"].data[0]
         if self.iteration <= self.change_reward_iterations[0]:
             self.get_logger().info("STAGE 1 REWARD: TEST FRUIT")
-            if self.fruit_tested:
+            if scale.active:
                 reward = 1.0
         else:
             self.get_logger().info("STAGE 2 REWARD: TEST FRUIT")
-            if self.fruit_tested:
+            if scale.active:
                 reward = 0.9 #TEST
 
         self.perceptions["test_fruit_goal"].data = reward
@@ -274,7 +294,6 @@ class IJCNNSim(Node):
 
     def reset_world(self, data):
         self.get_logger().info("Resetting world...")
-        self.fruit_tested = False
         self.fruit_correctly_accepted = False
         self.fruit_correctly_rejected = False
         if self.iteration <= self.change_reward_iterations[1]:

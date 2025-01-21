@@ -42,8 +42,6 @@ class IJCNNSim(Node):
         self.fruit_correctly_accepted = False
         self.fruit_correctly_rejected = False
 
-        self.fruit_placed = False
-
         self.gripper_max = 0.085
 
         self.iteration = 0
@@ -64,7 +62,7 @@ class IJCNNSim(Node):
             ang = numpy.arctan(x/y)
 
             valid = True
-
+            
             for object in self.perceptions[area["object"]].data:
                 if abs(object.distance - dist) < 0.1 and abs(object.angle - ang) < 0.09:
                     valid = False
@@ -290,8 +288,6 @@ class IJCNNSim(Node):
             abs(fruit.angle) == abs(self.fruit_left_side_pos['angle'])) and (
             not self.catched_fruit)
         
-        self.get_logger().info(f"OPA RACING: {placed}")
-        
         return placed
         
 
@@ -330,7 +326,6 @@ class IJCNNSim(Node):
         if (self.iteration <= self.change_reward_iterations['stage1']):
             self.get_logger().info("STAGE 0 REWARD: PLACE FRUIT")
             if self.fruit_in_placed_pos():
-                self.get_logger().info("FORZA DEPOR")
                 reward = 1.0
                 
         else:

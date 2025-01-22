@@ -135,6 +135,7 @@ class IJCNNSim(Node):
             self.perceptions["fruits"].data[0].distance = 1.9
             self.perceptions["fruits"].data[0].angle = 1.4
             self.perceptions["fruits"].data[0].dim_max = 0.1
+            self.closest_fruit = None
 
     def random_perceptions(self):
         self.catched_fruit = None
@@ -157,10 +158,10 @@ class IJCNNSim(Node):
 
         self.perceive_closest_fruit()
 
-        if self.rng.uniform() > 0.5:
-            self.perceptions["fruit_in_right_hand"].data = False
-            self.perceptions["fruit_in_left_hand"].data = False
-        else:
+        
+        self.perceptions["fruit_in_right_hand"].data = False
+        self.perceptions["fruit_in_left_hand"].data = False
+        if self.rng.uniform() > 0.5 and self.fruits:
             if self.perceptions["fruits"].data[0].angle > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
                 self.perceptions["fruit_in_left_hand"].data = False

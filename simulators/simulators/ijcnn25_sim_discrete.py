@@ -79,7 +79,7 @@ class IJCNNSim(Node):
             self.fruits.append(fruit)
 
         if self.rng.uniform() > 0.5 and scale:
-            if self.iteration <= self.change_reward_iterations['stage1']:
+            if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
                 positions = ['accepted_pos', 'rejected_pos', 'scale_pos']
             else:
                 positions = ['placed_pos_l', 'placed_pos_r', 'accepted_pos', 'rejected_pos', 'scale_pos']
@@ -324,15 +324,17 @@ class IJCNNSim(Node):
 
     def reward_place_fruit_goal(self):
         reward = 0.0 
-        if (self.iteration <= self.change_reward_iterations['stage1']):
-            self.get_logger().info("STAGE 0 REWARD: PLACE FRUIT")
+        if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
+            self.get_logger().info("STAGE 1 REWARD: PLACE FRUIT")
             if self.fruit_in_placed_pos():
                 reward = 1.0
                 
         else:
             reward = 1.0
-            if self.iteration <= self.change_reward_iterations['stage2']:
-                self.get_logger().info("STAGE 1 REWARD: NONE")
+            if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage2']):
+                self.get_logger().info("STAGE 2 REWARD: NONE")
+            else:
+                self.get_logger().info("STAGE 0 REWARD: NONE")
             
         self.perceptions["place_fruit_goal"].data = reward
 

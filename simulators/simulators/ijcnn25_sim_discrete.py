@@ -296,30 +296,31 @@ class IJCNNSim(Node):
         scale = self.perceptions["scales"].data[0]
         fruit = self.perceptions["fruits"].data[0]
         progress = 0.0
+        if self.iteration > self.change_reward_iterations['stage2']:
+            self.get_logger().info("STAGE 2 REWARD: PROGRESS CLASSIFY FRUIT")
+            if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
+                progress = 1.0
+            
+            elif scale.active==True:
+                progress = 0.75
+            
+            elif self.catched_fruit:
+                if (fruit.angle * scale.angle) > 0:
+                    progress = 0.5
+                else:
+                    progress = 0.250
+            
+            elif not self.catched_fruit:
+                if abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
+                    fruit.distance == self.fruit_left_side_pos["distance"]) and (
+                        fruit.angle * scale.angle > 0
+                    ):
+                    progress = 0.375
+            
+                elif self.fruits:
+                    progress = 0.125
 
-        if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
-            progress = 1.0
-        
-        elif scale.active==True:
-            progress = 0.75
-        
-        elif self.catched_fruit:
-            if (fruit.angle * scale.angle) > 0:
-                progress = 0.5
-            else:
-                progress = 0.250
-        
-        elif not self.catched_fruit:
-            if abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
-                fruit.distance == self.fruit_left_side_pos["distance"]) and (
-                    fruit.angle * scale.angle > 0
-                ):
-                progress = 0.375
-        
-            elif self.fruits:
-                progress = 0.125
-
-        self.perceptions["progress_classify_fruit_goal"].data = progress
+            self.perceptions["progress_classify_fruit_goal"].data = progress
 
 
     def reward_place_fruit_goal(self):

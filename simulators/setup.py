@@ -21,7 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'simulator_discrete = simulators.sim_discrete:main',
-            'ijcnn_simulator = simulators.ijcnn25_sim_discrete:main' 
+            'fruit_shop_simulator = simulators.fruit_shop_sim_discrete:main' 
         ],
     },
 )

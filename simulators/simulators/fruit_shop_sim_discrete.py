@@ -10,9 +10,9 @@ from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname
 
-class IJCNNSim(Node):
+class FruitShopSim(Node):
     def __init__(self):
-        super().__init__("IJCNNSim")
+        super().__init__("FruitShopSim")
         self.rng = None
         self.ident = None
         self.base_messages = {}
@@ -505,7 +505,7 @@ class IJCNNSim(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    sim = IJCNNSim()
+    sim = FruitShopSim()
     sim.load_configuration()
 
     try:

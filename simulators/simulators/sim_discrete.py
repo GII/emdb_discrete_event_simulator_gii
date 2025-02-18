@@ -173,6 +173,9 @@ class LTMSim(Node):
         """
         return abs(ang) <= 0.3925 and 0.46 <= dist <= 0.75
     
+    def object_pickable(self):
+        return self.object_too_close() or self.object_too_far()
+    
     def object_too_far_callback(self, request, response):
         """
         The callback to calculate if and object is out of range of the robot
@@ -190,7 +193,104 @@ class LTMSim(Node):
         response.too_far = too_far
         return response
     
+    def object_held_with_left_hand(self):
+        """
+        Check if an object is held with the left hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.perceptions['ball_in_left_hand'].data
+
+    def object_held_with_right_hand(self):
+        """
+        Check if an object is held with the right hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.perceptions['ball_in_right_hand'].data
+
+    def object_held(self):
+        """
+        Check if an object is held with one hand.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return self.object_held_with_left_hand() or self.object_held_with_right_hand()
     
+    def object_held_with_two_hands(self):
+        """
+        Check if an object is held with two hands.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is held or not
+        :rtype: bool
+        """
+        return (
+            self.object_held_with_left_hand()
+            and self.object_held_with_right_hand()
+        )
+    
+    def ball_and_box_on_the_same_side(self):
+        """
+        Check if an object and a box are on the same side.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object is in the same side or not
+        :rtype: bool
+        """
+        same_side = False
+        for box in self.perceptions["boxes"].data:
+            same_side = (self.perceptions['ball_in_left_hand'].data and box.angle > 0) or (
+                self.perceptions['ball_in_right_hand'].data and not (box.angle > 0)
+            )
+            if same_side:
+                break
+        return same_side
+    
+    def check_object_pickable_with_two_hands(self):
+        """
+        Check if an object can be hold with two hands.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object can be hold or not
+        :rtype: bool
+        """
+        pickable = False
+        for cylinder in self.perceptions["cylinders"].data:
+            pickable = (self.object_pickable_with_two_hands(cylinder.distance, cylinder.angle)) and not self.object_held() and not self.object_is_small(cylinder.diameter)
+            if pickable:
+                break
+        return pickable
+    
+    def check_object_pickable(self):
+        """
+        Check if an object is within the robot's reachable area.
+
+        :param perceptions: The perception given to check
+        :type perceptions: dict
+        :return: A value that indicates if the object can be moved or not
+        :rtype: bool
+        """        
+        pickable = False
+        for cylinder in self.perceptions["cylinders"].data:
+            pickable = not (self.object_too_far(cylinder.distance, cylinder.angle) or self.object_too_close(cylinder.distance, cylinder.angle))
+            if pickable:
+                break
+        return pickable
+
+
     def object_too_far(self, dist, ang):
         """
         Return True if the object is out of range of the robot.
@@ -387,14 +487,41 @@ class LTMSim(Node):
         :return: True if there is reward or False if not
         :rtype: bool
         """
-        self.perceptions["ball_in_box"].data = False
+        #self.perceptions["ball_in_box"].data = False
         for cylinder in self.perceptions["cylinders"].data:
             for box in self.perceptions["boxes"].data:
                 if (cylinder.distance == box.distance) and (cylinder.angle == box.angle):
-                    self.perceptions["ball_in_box"].data = True
+                    #self.perceptions["ball_in_box"].data = True
                     return True
         return False
     
+    def reward_progress_ball_in_box(self):
+        progress=0.0
+        if self.reward_ball_in_box():
+            progress = 1.0
+        elif self.object_held():
+            if self.object_held_with_two_hands():
+                progress=0.6
+            elif self.ball_and_box_on_the_same_side():
+                progress=0.6
+            else:
+                progress=0.3
+        elif self.check_object_pickable_with_two_hands():
+            progress=0.3
+        elif self.check_object_pickable():
+            progress=0.2
+        
+        
+        self.perceptions['progress_ball_in_box'].data = progress
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}") 
+
+    def reward_ball_in_box_goal(self):
+        progress=0.0
+        if self.reward_ball_in_box():
+            progress = 1.0
+        
+        self.perceptions['ball_in_box_goal'].data = progress
+        self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}") 
 
     def reward_ball_with_robot(self):
         """
@@ -744,6 +871,19 @@ class LTMSim(Node):
                         distance = self.normal_outer(abs(cylinder.angle))
                     cylinder.distance = self.avoid_reward_by_chance(distance - 0.1, cylinder.angle)
                     break
+    
+    def reset_world(self, data):
+        self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
+        self.last_reset_iteration = data.iteration
+        self.world = World[data.world]
+        self.random_perceptions()
+        self.publish_perceptions()
+        self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
+        if (not self.catched_object) and (
+            self.perceptions["ball_in_left_hand"].data
+            or self.perceptions["ball_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
 
     
     def new_command_callback(self, data):
@@ -755,20 +895,20 @@ class LTMSim(Node):
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
-            self.last_reset_iteration = data.iteration
-            self.world = World[data.world]
-            self.random_perceptions()
-            for ident, publisher in self.sim_publishers.items():
-                self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
-                publisher.publish(self.perceptions[ident])
-            if (not self.catched_object) and (
-                self.perceptions["ball_in_left_hand"].data
-                or self.perceptions["ball_in_right_hand"].data
-            ):
-                self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            self.reset_world(data)
         elif data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
+
+    def publish_perceptions(self):
+        for ident, publisher in self.sim_publishers.items():
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            publisher.publish(self.perceptions[ident])
+
+    def world_reset_service_callback(self, request, response):
+        self.reset_world(request)
+        response.success=True
+        return response
 
     def new_action_callback(self, data):
         """
@@ -780,9 +920,7 @@ class LTMSim(Node):
         self.get_logger().info("Executing policy " + str(data.data))
         getattr(self, data.data + "_policy")()
         self.update_reward_sensor()
-        for ident, publisher in self.sim_publishers.items():
-            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
-            publisher.publish(self.perceptions[ident])
+        self.publish_perceptions()
         if (not self.catched_object) and (
             self.perceptions["ball_in_left_hand"].data
             or self.perceptions["ball_in_right_hand"].data
@@ -790,9 +928,31 @@ class LTMSim(Node):
             self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
             rclpy.shutdown()
 
+    def new_action_service_callback(self, request, response):
+        """
+        Execute a policy and publish new perceptions.
+
+        :param request: The message that contains the policy to execute
+        :type request: ROS srv defined in setup_control_channel
+        :param response: Response of the success of the execution of the action
+        :type response: ROS srv defined in setup_control_channel
+        """
+        self.get_logger().info("Executing policy " + str(request.policy))
+        getattr(self, request.policy + "_policy")()
+        self.update_reward_sensor()
+        self.publish_perceptions()
+        if (not self.catched_object) and (
+            self.perceptions["ball_in_left_hand"].data
+            or self.perceptions["ball_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            rclpy.shutdown()
+        response.success = True
+        return response
+
     def setup_control_channel(self, simulation):
         """
-        Configure the ROS topic where listen for commands to be executed.
+        Configure the ROS topic/service where listen for commands to be executed.
 
         :param simulation: The params from the config file to setup the control channel
         :type simulation: dict
@@ -803,11 +963,25 @@ class LTMSim(Node):
         message = class_from_classname(classname)
         self.get_logger().info("Subscribing to... " + str(topic))
         self.create_subscription(message, topic, self.new_command_callback, 0)
-        topic = simulation["executed_policy_topic"]
-        classname = simulation["executed_policy_msg"]
-        message = class_from_classname(classname)
-        self.get_logger().info("Subscribing to... " + str(topic))
-        self.create_subscription(message, topic, self.new_action_callback, 0)
+        topic = simulation.get("executed_policy_topic")
+        service_policy = simulation.get("executed_policy_service")
+        service_world_reset = simulation.get("world_reset_service")
+
+        if topic:
+            self.get_logger().info("Subscribing to... " + str(topic))
+            self.create_subscription(message, topic, self.new_action_callback, 0)
+        if service_policy:
+            self.get_logger().info("Creating server... " + str(service_policy))
+            classname = simulation["executed_policy_msg"]
+            message_policy_srv = class_from_classname(classname)
+            self.create_service(message_policy_srv, service_policy, self.new_action_service_callback, callback_group=self.cbgroup_server)
+            self.get_logger().info("Creating perception publisher timer... ")
+            self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
+        if service_world_reset:
+            classname= simulation["executed_policy_msg"]
+            self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
+            
 
     def setup_perceptions(self, perceptions):
         """
@@ -825,6 +999,8 @@ class LTMSim(Node):
             if "List" in classname:
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            elif "Float" in classname:
+                self.perceptions[sid].data = 0.0
             else:
                 self.perceptions[sid].data = False
             self.get_logger().info("I will publish to... " + str(topic))

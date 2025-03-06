@@ -1,23 +1,33 @@
 import math
 import numpy as np
+from enum import Enum
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
 from scipy.spatial import distance
 from numpy.random import Generator
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
 import numbers
 import time
 import random
 
+class EntityType(Enum):
+    DEFAULT = 0
+    ROBOT = 1
+    BOX = 2
+    BALL = 3
+
+
 
 class Entity:
-    def __init__(self, name, x=0, y=0, angle=0) -> None:
+    def __init__(self, name, x=0, y=0, angle=0, type=EntityType.DEFAULT) -> None:
         self.name=name
         self.visual=[]
         self.x=x
         self.y=y
         self.angle=angle
+        self.type=type
 
     def get_angle(self):
         return self.angle
@@ -57,7 +67,7 @@ class Entity:
 
 class Robot(Entity):
     def __init__(self, name, x=0, y=0, angle=0) -> None:
-        super().__init__(name, x, y, angle)
+        super().__init__(name, x, y, angle, type=EntityType.ROBOT)
         self.visual.append(patches.Rectangle((0, 0), 75, 60, angle=0.0, fc=(0.8, 0, 0.2), label=f"{name}_body"))
         self.visual.append(patches.Rectangle((0, 0), 20, 60, angle=0.0, fc='black', label=f'{name}_act'))
         self.catched_object=None
@@ -109,7 +119,7 @@ class Robot(Entity):
 
 class Ball(Entity):
     def __init__(self, name, x=0, y=0, angle=0, radius=40, color="red") -> None:
-        super().__init__(name, x, y, angle)
+        super().__init__(name, x, y, angle, type=EntityType.BALL)
         self.visual=patches.Circle((0, 0), radius, fc=color, label=name)
         self.catched_by=None
         self.update_visual()
@@ -129,7 +139,7 @@ class Ball(Entity):
 
 class Box(Entity):
     def __init__(self, name, x=0, y=0, angle=0, color="blue", w=100, h=100) -> None:
-        super().__init__(name, x, y, angle)
+        super().__init__(name, x, y, angle, type=EntityType.BOX)
         self.visual=patches.Rectangle((0, 0), w, h, angle=0.0, fc=color, label=f"{name}")
         self.contents=[]
         self.update_visual()
@@ -172,8 +182,9 @@ class Sim(object):
     and get/set the position of all of them.
     """
 
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True):
+    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
         """Create the different objects present in the Simulator and place them in it"""
+        self.verbose=verbose
 
         #Plot and experimental area bounds
         self.x_plt_bounds=x_size
@@ -182,41 +193,53 @@ class Sim(object):
         self.y_bounds=y_bounds
 
         # Enable simulation visualization (see the objects moving)
-        self.visualize = True
+        self.visualize = visualize
 
         #Object list
         self.entities=[]
 
         # Generate Plots
-        self.fig = plt.figure()
-        self.fig.canvas.set_window_title('Simulator')
-        self.ax = plt.axes(xlim=self.x_plt_bounds, ylim=self.y_plt_bounds)
-        self.ax.axes.get_xaxis().set_visible(False)
-        self.ax.axes.get_yaxis().set_visible(False)
-        self.ax.axes.set_aspect("equal")
+        if self.visualize:
+            self.fig = plt.figure()
+            self.fig.canvas.set_window_title('Simulator')
+            self.ax = plt.axes(xlim=self.x_plt_bounds, ylim=self.y_plt_bounds)
+            self.ax.axes.get_xaxis().set_visible(False)
+            self.ax.axes.get_yaxis().set_visible(False)
+            self.ax.axes.set_aspect("equal")
 
-        ##Subtitle
-        self.ball_active_goal = plt.Circle((500, 900), 40, fc='white', alpha=1.0, label='ball_active_goal')
-        self.ball_active_subgoal = plt.Circle((1200, 900), 40, fc='white', alpha=1.0, label='ball_active_subgoal')
-        self.ball_active_context = plt.Circle((2000, 900), 40, fc='white', alpha=1.0, label='ball_context')
+            ##Subtitle
+            self.ball_active_goal = plt.Circle((500, 900), 40, fc='white', alpha=1.0, label='ball_active_goal')
+            self.ball_active_subgoal = plt.Circle((1200, 900), 40, fc='white', alpha=1.0, label='ball_active_subgoal')
+            self.ball_active_context = plt.Circle((2000, 900), 40, fc='white', alpha=1.0, label='ball_context')
 
-        xy1 = (self.ball_active_context.center[0], self.ball_active_context.center[1]+1.2*self.ball_active_context.radius)
-        self.ax.annotate("CONTEXT", xy=xy1, fontsize=10, ha="center")
-        xy2 = (self.ball_active_goal.center[0], self.ball_active_goal.center[1]+1.2*self.ball_active_goal.radius)
-        self.ax.annotate("GOAL", xy=xy2, fontsize=10, ha="center")
-        xy3 = (self.ball_active_subgoal.center[0], self.ball_active_subgoal.center[1] + 1.2 * self.ball_active_subgoal.radius)
-        self.ax.annotate("SUB-GOAL", xy=xy3, fontsize=10, ha="center")
+            xy1 = (self.ball_active_context.center[0], self.ball_active_context.center[1]+1.2*self.ball_active_context.radius)
+            self.ax.annotate("CONTEXT", xy=xy1, fontsize=10, ha="center")
+            xy2 = (self.ball_active_goal.center[0], self.ball_active_goal.center[1]+1.2*self.ball_active_goal.radius)
+            self.ax.annotate("GOAL", xy=xy2, fontsize=10, ha="center")
+            xy3 = (self.ball_active_subgoal.center[0], self.ball_active_subgoal.center[1] + 1.2 * self.ball_active_subgoal.radius)
+            self.ax.annotate("SUB-GOAL", xy=xy3, fontsize=10, ha="center")
 
-        # Draw Movement boundaries
-        plt.axhline(y=self.y_bounds[1], xmin=self.x_bounds[0]/self.x_plt_bounds[1], xmax=self.x_bounds[1]/self.x_plt_bounds[1], linestyle='--', color='grey')
-        plt.axhline(y=self.y_bounds[0], xmin=self.x_bounds[0]/self.x_plt_bounds[1], xmax=self.x_bounds[1]/self.x_plt_bounds[1], linestyle='--', color='grey')
-        plt.axvline(x=self.x_bounds[1], ymin=self.y_bounds[0]/self.y_plt_bounds[1], ymax=self.y_bounds[1]/self.y_plt_bounds[1], linestyle='--', color='grey')
-        plt.axvline(x=self.x_bounds[0], ymin=self.y_bounds[0]/self.y_plt_bounds[1], ymax=self.y_bounds[1]/self.y_plt_bounds[1], linestyle='--', color='grey')
+            # Draw Movement boundaries
+            plt.axhline(y=self.y_bounds[1], xmin=self.x_bounds[0]/self.x_plt_bounds[1], xmax=self.x_bounds[1]/self.x_plt_bounds[1], linestyle='--', color='grey')
+            plt.axhline(y=self.y_bounds[0], xmin=self.x_bounds[0]/self.x_plt_bounds[1], xmax=self.x_bounds[1]/self.x_plt_bounds[1], linestyle='--', color='grey')
+            plt.axvline(x=self.x_bounds[1], ymin=self.y_bounds[0]/self.y_plt_bounds[1], ymax=self.y_bounds[1]/self.y_plt_bounds[1], linestyle='--', color='grey')
+            plt.axvline(x=self.x_bounds[0], ymin=self.y_bounds[0]/self.y_plt_bounds[1], ymax=self.y_bounds[1]/self.y_plt_bounds[1], linestyle='--', color='grey')
 
     def plot_entities(self):
         for entity in reversed(self.entities):
             entity.register_visual(self.ax)
 
+    def get_close_entities(self, entity:Entity, threshold):        
+        close_list=[]
+        ent_list= [ent for ent in self.entities if ent!=entity]
+        for ent in ent_list:
+            dist = distance.euclidean(ent.get_pos(), entity.get_pos())
+            if dist <= threshold:
+                close_list.append(ent)
+        return close_list
+
+    def filter_entities(self, entities, type):
+        return [entity for entity in entities if entity.type == type]
 
     def apply_action(self, **params):
         """Placeholder method: Implement the action logic according to the desired scenario"""
@@ -285,8 +308,8 @@ class Sim(object):
 
 
 class Baxter2Arms(Sim):
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True):
-        super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
+    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
+        super().__init__(x_size, y_size, x_bounds, y_bounds, visualize, verbose)
         #Define objects in simulation
         ## Baxter
         self.baxter_left=Robot("baxter_left", 700, 300, 90)
@@ -296,44 +319,31 @@ class Baxter2Arms(Sim):
         self.baxter_right_limts=((1050, 2400),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
 
-    def move_robot_arm(self, arm:Robot, vel=10):
-        """Move robot arm wih a specific velocity (default 10)"""
+    def move_robot_arm(self, arm:Robot, vel):
+        """Move robot arm wih a specific velocity"""
         x, y = arm.get_pos()
         arm.set_pos(x + vel * math.cos(arm.angle * math.pi / 180),
                                   y + vel * math.sin(arm.angle * math.pi / 180))
 
-    def robot_arm_action(self, arm: Robot, relative_angle, vel=10):
-        """Move robot arm with a specific angle and velocity (default 10)"""
+    def robot_arm_action(self, arm: Robot, relative_angle, vel, step_world=True):
+        """Move robot arm with a specific angle and velocity"""
         angle = arm.angle + relative_angle
         arm.set_angle(angle)
         self.move_robot_arm(arm, vel)
-        self.world_rules()
+        if step_world:
+            self.world_rules()
 
-    def apply_action(self, rel_angle_l=0, rel_angle_r=0, vel_left=20, vel_right=20, gripper_left=False, gripper_right=False):
-        """Move arms with a specific angle and velocity (default 20)"""
-        self.robot_arm_action(self.baxter_left, rel_angle_l, vel_left)
-        self.robot_arm_action(self.baxter_right, rel_angle_r, vel_right)
+    def apply_action(self, rel_angle_l=0, rel_angle_r=0, vel_left=0, vel_right=0, gripper_left=False, gripper_right=False):
+        """Move arms with a specific angle and velocity (default 0)"""
+        self.robot_arm_action(self.baxter_left, rel_angle_l, vel_left, step_world=False)
+        self.robot_arm_action(self.baxter_right, rel_angle_r, vel_right, step_world=False)
         self.baxter_left.set_gripper(gripper_left)
         self.baxter_right.set_gripper(gripper_right)
         self.world_rules()
         if self.visualize:
             self.fig.canvas.draw()
             plt.pause(0.001)
-    
-    def get_close_object(self, entity:Entity, threshold=20):        
-        for object in self.objects:
-            dist=distance.euclidean(entity.get_pos(), object.get_pos())
-            if dist<=threshold:
-                return object
-        return None
 
-    def get_close_objects(self, entity:Entity, threshold=20):
-        objects=[]        
-        for object in self.objects:
-            dist=distance.euclidean(entity.get_pos(), object.get_pos())
-            if dist<=threshold:
-                objects.append(object)
-        return objects
 
 
 
@@ -388,8 +398,9 @@ class ComplexScenario(Baxter2Arms):
 
 
 class SimpleScenario(Baxter2Arms):
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True):
+    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, logger=None):
         super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
+        self.logger:RcutilsLogger=logger
         ##Objects
         self.objects=[]
         self.objects.append(Ball("ball_1", 300, 650, color="red"))
@@ -400,8 +411,9 @@ class SimpleScenario(Baxter2Arms):
         self.entities.append(self.box1)
         
         # Show figure and patches
-        self.plot_entities()
-        plt.pause(0.001)
+        if self.visualize:
+            self.plot_entities()
+            plt.pause(0.001)
 
     def world_rules(self):
         """Establish the ball position in the scenario"""
@@ -415,17 +427,17 @@ class SimpleScenario(Baxter2Arms):
         for robot in self.robots:
             #Catch close objects
             if robot.gripper_state and not robot.catched_object:
-                close_object=self.get_close_object(robot)
+                close_object=self.filter_entities(self.get_close_entities(robot, threshold=50), EntityType.BALL)
                 if close_object:
-                    if not close_object.catched_by:
-                        robot.catched_object=close_object
+                    if not close_object[0].catched_by:
+                        robot.catched_object=close_object[0]
                         robot.catched_object.catched_by=robot
             if not robot.gripper_state and robot.catched_object:
                 robot.catched_object.catched_by=None
                 robot.catched_object=None
 
             #Check if something is in the box
-            objs_close=self.get_close_objects(self.box1, threshold=50)
+            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=50), EntityType.BALL)
             self.box1.contents=[]
             for obj in objs_close:
                 if not obj.catched_by:
@@ -436,13 +448,30 @@ class SimpleScenario(Baxter2Arms):
             if object.catched_by:
                 pose=object.catched_by.get_pos()
                 object.set_pos(pose[0], pose[1])
+        
+        if self.logger:
+            self.logger.info(f"DEBUG --------------- Updated World ---------------")
+            for robot in self.robots:
+                self.logger.info(f"{robot.name} gripper state: {robot.gripper_state}")
+                if robot.catched_object:
+                    self.logger.info(f"{robot.name} has catched {robot.catched_object.name}")    
+                else:
+                    self.logger.info(f"{robot.name} has not catched any object")
+            for obj in self.entities:
+                self.logger.info(f"{obj.name} is at position {obj.get_pos()}")
 
     def restart_scenario(self, rng:Generator):
         self.baxter_left.set_pos(rng.uniform(self.baxter_left_limits[0][0], self.baxter_left_limits[0][1]), rng.uniform(self.baxter_left_limits[1][0], self.baxter_left_limits[1][1]))
         self.baxter_right.set_pos(rng.uniform(self.baxter_right_limts[0][0], self.baxter_right_limts[0][1]), rng.uniform(self.baxter_right_limts[1][0], self.baxter_right_limts[1][1])) 
+        self.baxter_left.set_gripper(False)
+        self.baxter_right.set_gripper(False)
         self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+        self.box1.contents=[]
+        #TODO: Reset grippers
+
         for object in self.objects:
             object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+            object.catched_by=None
 
         
     

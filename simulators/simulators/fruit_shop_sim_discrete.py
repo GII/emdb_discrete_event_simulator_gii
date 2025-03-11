@@ -184,7 +184,7 @@ class FruitShopSim(Node):
                 self.perceptions["fruit_in_left_hand"].data = True
             if scale.active:
                 scale.active = False
-                scale.state = 0
+                #scale.state = 0
                 if self.closest_fruit == self.tested_fruit:
                     self.tested_fruit = None
                 else:
@@ -228,7 +228,8 @@ class FruitShopSim(Node):
                 self.catched_fruit["angle"] = scale.angle
                 if self.iteration > self.change_reward_iterations['stage1']:
                     scale.active = True
-                    scale.state = 1 if self.rng.uniform() > 0.5 else 2
+                    if scale.state == 0:
+                        scale.state = 1 if self.rng.uniform() > 0.5 else 2
                 self.perceptions["fruit_in_left_hand"].data = False
                 self.perceptions["fruit_in_right_hand"].data = False
                 self.tested_fruit = self.catched_fruit
@@ -246,8 +247,8 @@ class FruitShopSim(Node):
             self.tested_fruit["angle"] = self.accepted_fruit_pos["angle"]
             if scale.state == 1:
                 self.fruit_correctly_accepted = True
+                scale.state = 0
             scale.active = False
-            scale.state = 0
             self.tested_fruit = None
 
         elif self.catched_fruit:
@@ -265,8 +266,8 @@ class FruitShopSim(Node):
             self.tested_fruit["angle"] = self.rejected_fruit_pos["angle"]
             if scale.state == 2:
                 self.fruit_correctly_rejected = True
+                scale.state = 0
             scale.active = False
-            scale.state = 0
             self.tested_fruit = None
         elif self.catched_fruit:
             if self.perceptions["fruit_in_right_hand"].data:

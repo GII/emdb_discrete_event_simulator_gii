@@ -386,6 +386,7 @@ class FruitShopSim(Node):
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.iteration = data.iteration
+        self.update_reward_sensor()
         if data.command == "reset_world":
             self.reset_world(data)
         elif data.command == "end":

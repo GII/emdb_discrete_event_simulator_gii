@@ -1,0 +1,15 @@
+bool discharge_light
+bool emergency_button
+bool mode_selector
+bool off_button
+bool on_button
+float64 output_flow_dial
+int8 start_button
+bool system_backup_light
+bool test_light
+int8 tool_1
+int8 tool_2
+int8 v1_button
+int8 v2_button
+int8 v3_button
+float64 voltage_dial

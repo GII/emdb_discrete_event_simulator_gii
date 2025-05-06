@@ -18,6 +18,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Object2DMsg.msg"
   "msg/ObjectListMsg.msg"
   "msg/ObjectMsg.msg"
+  "msg/PumpPanelListMsg.msg"
+  "msg/PumpPanelMsg.msg"
   "msg/ScaleListMsg.msg"
   "msg/ScaleMsg.msg"
   "srv/CalculateClosestPosition.srv"

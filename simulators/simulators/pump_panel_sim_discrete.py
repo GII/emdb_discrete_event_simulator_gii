@@ -11,6 +11,9 @@ from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname, EncodableDecodableEnum, actuation_msg_to_dict
 
 class PumpObjects(EncodableDecodableEnum):
+    """
+    This class defines the objects that can be found in the pump panel.
+    """
     DISCHARGE_LIGHT = 0
     EMERGENCY_BUTTON = 1
     MODE_SELECTOR = 2
@@ -28,7 +31,14 @@ class PumpObjects(EncodableDecodableEnum):
     VOLTAGE_DIAL = 14
 
 class PumpPanelSim(Node):
+    """
+    PumpPanelSim simulator class.
+    """
     def __init__(self):
+        """
+        Constructor of the PumpPanelSim simulator class.
+        Initializes the simulator with parameters, publishers, and perception messages.
+        """
         super().__init__("PumpPanelSim")
         self.rng = None
         self.ident = None
@@ -52,6 +62,9 @@ class PumpPanelSim(Node):
         self.emergency = False
 
     def simulate_values(self):
+        """
+        Simulate the valuas of some indicators of the pump panel.
+        """
         if self.panel_on:
             # Voltage
             distortion = self.rng.uniform(-2.5, 2.5)
@@ -87,6 +100,10 @@ class PumpPanelSim(Node):
         obj_perc.system_backup_light = system_backup_light
 
     def initial_perceptions(self):
+        """
+        Initialize the perceptions of the pump panel simulator.
+        The initial state is with all indicators off, all valves closed and the tools stored.
+        """
         self.perceptions['panel_objects'].data = []
         self.perceptions['panel_objects'].data.append(self.base_messages['panel_objects']())
         obj_perc = self.perceptions["panel_objects"].data[0]
@@ -119,6 +136,12 @@ class PumpPanelSim(Node):
         self.update_reward_sensor()
 
     def grasp_object_policy(self, obj = None):
+        """
+        Parametrized policy to grasp an object.
+
+        :param obj: The object to grasp.
+        :type obj: str 
+        """
         obj_perc = self.perceptions["panel_objects"].data[0]
         if not self.caught_tool:
             if obj == 'TOOL_1':
@@ -128,6 +151,13 @@ class PumpPanelSim(Node):
             self.caught_tool = True
 
     def deliver_object_policy(self, obj = None):
+        """
+        Policy to deliver to the user the object that was caught.
+        
+        :param obj: The object to deliver. It is not necessary to specify it, 
+            as the simulator will always deliver the tool that was caught.
+        :type obj: str
+        """
         obj_perc = self.perceptions["panel_objects"].data[0]
         if self.caught_tool:
             if obj_perc.tool_1 == 1:
@@ -137,6 +167,13 @@ class PumpPanelSim(Node):
             self.caught_tool = False
     
     def store_object_policy(self, obj = None):
+        """
+        Policy to store in its respective box the object that was caught.
+
+        :param obj: The object to store. It is not necessary to specify it,
+            as the simulator will always store the tool that was caught.
+        :type obj: str
+        """
         obj_perc = self.perceptions["panel_objects"].data[0]
         if self.caught_tool:
             if obj_perc.tool_1 == 1:
@@ -146,6 +183,12 @@ class PumpPanelSim(Node):
             self.caught_tool = False
 
     def press_object_policy(self, obj = None):
+        """
+        Parametrized policy to press an object.
+
+        :param obj: The object to press.
+        :type obj: str
+        """
         obj_perc = self.perceptions["panel_objects"].data[0]
         if not self.caught_tool:
             if obj == 'EMERGENCY_BUTTON':
@@ -213,29 +256,54 @@ class PumpPanelSim(Node):
                     self.pump_started = True
 
     def reward_start_pump_goal(self):
+        """
+        Gives a reward of 1.0 if the pump has been started.
+        """
         reward = 0.0
         if self.pump_started:
             reward = 1.0
         self.perceptions["start_pump_goal"].data = reward
 
     def reset_world(self, data):
+        """
+        Reset the world to the initial state.
+
+        :param data: The message that contains the command to reset the world. It is not used.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
+        cognitive_processes_interfaces.srv.WorldReset.Request
+        """
         self.get_logger().info("Resetting world...")
         self.initial_perceptions()
         self.publish_perceptions()
     
     def update_reward_sensor(self):
-        """Update goal sensors' values."""
+        """
+        Update goal sensors' values.
+        """
         for sensor in self.perceptions:
             reward_method = getattr(self, "reward_" + sensor, None)
             if callable(reward_method):
                 reward_method()
     
     def publish_perceptions(self):
+        """
+        Publish the current perceptions to the corresponding topics.
+        """
         for ident, publisher in self.sim_publishers.items():
             self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
 
     def world_reset_service_callback(self, request, response):
+        """
+        Callback for the world reset service.
+
+        :param request: The message that contains the request to reset the world.
+        :type request: ROS msg defined in the config file Typically cognitive_processes_interfaces.srv.WorldReset.Request
+        :param response: Response of the world reset service.
+        :type response: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        :return: Response indicating the success of the world reset.
+        :rtype: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        """
         self.reset_world(request)
         response.success=True
         return response
@@ -244,8 +312,8 @@ class PumpPanelSim(Node):
         """
         Process a command received
 
-        :param data: The message that contais the command received
-        :type data: ROS msg defined in setup_control_channel
+        :param data: The message that contais the command received.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.simulate_values()
@@ -261,12 +329,13 @@ class PumpPanelSim(Node):
         """
         Execute a policy and publish new perceptions.
 
-        :param request: The message that contains the policy to execute
-        :type request: ROS srv defined in setup_control_channel
-        :param response: Response of the success of the execution of the action
-        :type response: ROS srv defined in setup_control_channel
+        :param request: The message that contains the policy execute and its parameter.
+        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Request
+        :param response: Response of the success of the execution of the action.
+        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
+        :return: Response indicating the success of the action execution.
+        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
         """
-        #TODO: AÑADIR PARAMETRO DE LA POLICY
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
@@ -287,6 +356,12 @@ class PumpPanelSim(Node):
         return response
 
     def setup_perceptions(self, perceptions):
+        """
+        Configure the ROS topics where the simulator will publish the perceptions.
+
+        :param perceptions: A list of dictionaries where each dictionary contains the name, perception topic, and perception message class.
+        :type perceptions: list
+        """
         for perception in perceptions:
             sid = perception["name"]
             topic = perception["perception_topic"]
@@ -307,7 +382,7 @@ class PumpPanelSim(Node):
         """
         Configure the ROS topic/service where listen for commands to be executed.
 
-        :param simulation: The params from the config file to setup the control channel
+        :param simulation: The params from the config file to setup the control channel.
         :type simulation: dict
         """
         self.ident = simulation["id"]
@@ -332,10 +407,21 @@ class PumpPanelSim(Node):
             self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
 
     def load_experiment_file_in_commander(self):
+        """
+        Load the configuration file in the commander node.
+
+        :return: Response from the commander node indicating the success of the loading.
+        :rtype: core_interfaces.srv.LoadConfig.Response
+        """
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
 
     def load_configuration(self):
+        """
+        Load the configuration file and setup the simulator.
+        It is configured the random number generator, the stages of the experiment,
+        the perceptions, and the control channel.
+        """
         if self.random_seed:
             self.rng = numpy.random.default_rng(self.random_seed)
             self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")

@@ -13,6 +13,9 @@ import time
 import random
 
 class EntityType(Enum):
+    """
+    Class that defines the different types of entities in the simulator.
+    """
     DEFAULT = 0
     ROBOT = 1
     BOX = 2
@@ -21,7 +24,24 @@ class EntityType(Enum):
 
 
 class Entity:
-    def __init__(self, name, x=0, y=0, angle=0, type=EntityType.DEFAULT) -> None:
+    """
+    Class that implements an Entity in the simulator.
+    """
+    def __init__(self, name, x=0.0, y=0.0, angle=0.0, type=EntityType.DEFAULT) -> None:
+        """
+        Create an Entity with a name, position (x, y), angle and type.
+
+        :param name: Name of the entity.
+        :type name: str
+        :param x: x position of the entity.
+        :type x: float
+        :param y: y position of the entity.
+        :type y: float
+        :param angle: Angle of the entity in degrees.
+        :type angle: float
+        :param type: Type of the entity.
+        :type type: simulators.scenarios_2D.EntityType
+        """
         self.name=name
         self.visual=[]
         self.x=x
@@ -30,12 +50,34 @@ class Entity:
         self.type=type
 
     def get_angle(self):
+        """
+        Get the angle of the entity.
+
+        :return: Angle of the entity in degrees.
+        :rtype: float
+        """
         return self.angle
     
     def get_pos(self):
+        """
+        Get the position of the entity.
+
+        :return: Tuple with the x and y position of the entity.
+        :rtype: tuple
+        """
         return (self.x, self.y)
     
     def set_pos(self, x=None, y=None):
+        """
+        Set the position of the entity.
+        If x or y is not provided, it will not be changed.
+
+        :param x: x position of the entity.
+        :type x: float
+        :param y: y position of the entity.
+        :type y: float
+        :raises TypeError: If x or y is not a number.
+        """
         if x:
             if isinstance(x, numbers.Number):
                 self.x=x
@@ -49,24 +91,76 @@ class Entity:
         self.update_visual()
     
     def set_angle(self, angle):
+        """
+        Set the angle of the entity.
+        The angle is bounded in the range [-180, 180] degrees.
+
+        :param angle: Angle of the entity in degrees.
+        :type angle: float
+        """
         self.angle=((angle+180)%360)-180 #Bounded in range [-180, 180]
         self.update_visual()
 
     def set_color(self, color):
+        """
+        Set the color of the entity.
+        This method should be implemented in the subclasses.
+
+        :param color: Color of the entity.
+        :type color: str
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
     
     def set_alpha(self, alpha):
+        """
+        Set the transparency of the entity.
+        This method should be implemented in the subclasses.
+
+        :param alpha: Transparency of the entity, between 0 (transparent) and 1 (opaque).
+        :type alpha: float
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
     
     def register_visual(self, ax:Axes):
+        """
+        Register the visual representation of the entity in the given Axes.
+        This method should be implemented in the subclasses.
+
+        :param ax: Axes where the visual representation will be registered.
+        :type ax: matplotlib.axes.Axes
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
     
     def update_visual(self):
+        """
+        Update the visual representation of the entity.
+        This method should be implemented in the subclasses.
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
     
 
 class Robot(Entity):
-    def __init__(self, name, x=0, y=0, angle=0) -> None:
+    """
+    Class that implements a Robot entity in the simulator.
+    """
+    def __init__(self, name, x=0.0, y=0.0, angle=0.0) -> None:
+        """
+        Create the robot entity.
+
+        :param name: Name of the robot.
+        :type name: str
+        :param x: x position of the robot.
+        :type x: float
+        :param y: y position of the robot.
+        :type y: float
+        :param angle: Angle of the robot in degrees.
+        :type angle: float
+        """
         super().__init__(name, x, y, angle, type=EntityType.ROBOT)
         self.visual.append(patches.Rectangle((0, 0), 75, 60, angle=0.0, fc=(0.8, 0, 0.2), label=f"{name}_body"))
         self.visual.append(patches.Rectangle((0, 0), 20, 60, angle=0.0, fc='black', label=f'{name}_act'))
@@ -75,14 +169,29 @@ class Robot(Entity):
         self.update_visual()
     
     def set_gripper(self, value):
+        """
+        Set the gripper state of the robot.
+
+        :param value: True if the gripper is closed, False otherwise.
+        :type value: bool
+        """
         self.gripper_state=value
         self.update_visual()
     
     def register_visual(self, ax:Axes):
+        """
+        Register the visual representation of the robot in the given Axes.
+
+        :param ax: Axes where the visual representation will be registered.
+        :type ax: matplotlib.axes.Axes
+        """
         for patch in self.visual:
             ax.add_patch(patch)
     
     def update_visual(self):
+        """
+        Update the visual representation of the robot.
+        """
         #Set body position
         w = self.visual[0].get_width()
         h = self.visual[0].get_height()
@@ -111,43 +220,125 @@ class Robot(Entity):
             self.visual[1].set_edgecolor("black")
     
     def set_color(self, color):
+        """
+        Set the color of the robot.
+
+        :param color: Color of the robot.
+        :type color: str
+        """
         self.visual[0].set_color(color)
     
     def set_alpha(self, alpha):
+        """
+        Set the transparency of the robot entity in the visual representation.
+
+        :param alpha: Transparency of the robot, between 0 (transparent) and 1 (opaque).
+        :type alpha: float
+        """
         self.visual[0].set_alpha(alpha)
         self.visual[1].set_alpha(alpha)
 
 class Ball(Entity):
-    def __init__(self, name, x=0, y=0, angle=0, radius=40, color="red") -> None:
+    """
+    Class that implements a Ball entity in the simulator.
+    """
+    def __init__(self, name, x=0.0, y=0.0, angle=0.0, radius=40.0, color="red") -> None:
+        """
+        Create the ball entity.
+
+        :param name: Name of the ball.
+        :type name: str
+        :param x: x position of the ball.
+        :type x: float
+        :param y: y position of the ball.
+        :type y: float
+        :param angle: Angle of the ball in degrees.
+        :type angle: float
+        :param radius: Radius of the ball.
+        :type radius: float
+        :param color: Color of the ball.
+        :type color: str
+        """
         super().__init__(name, x, y, angle, type=EntityType.BALL)
         self.visual=patches.Circle((0, 0), radius, fc=color, label=name)
         self.catched_by=None
         self.update_visual()
 
     def register_visual(self, ax:Axes):
+        """
+        Register the visual representation of the ball in the given Axes.
+
+        :param ax: Axes where the visual representation will be registered.
+        :type ax: matplotlib.axes.Axes
+        """
         ax.add_patch(self.visual)
 
     def update_visual(self):
+        """
+        Update the visual representation of the ball.
+        """
         self.visual.set_center((self.x, self.y))
     
     def set_color(self, color):
+        """
+        Set the color of the ball.
+
+        :param color: Color of the ball.
+        :type color: str    
+        """
         self.visual.set_color(color)
 
     def set_alpha(self, alpha):
+        """
+        Set the transparency of the ball entity in the visual representation.
+
+        :param alpha: Transparency of the ball, between 0 (transparent) and 1 (opaque).
+        :type alpha: float
+        """
         self.visual.set_alpha(alpha)
 
 
 class Box(Entity):
-    def __init__(self, name, x=0, y=0, angle=0, color="blue", w=100, h=100) -> None:
+    """
+    Class that implements a Box entity in the simulator.
+    """
+    def __init__(self, name, x=0.0, y=0.0, angle=0.0, color="blue", w=100.0, h=100.0) -> None:
+        """
+        Create the box entity.
+
+        :param name: Name of the box.
+        :type name: str
+        :param x: x position of the box.
+        :type x: float
+        :param y: y position of the box.
+        :type y: float
+        :param angle: Angle of the box in degrees.
+        :type angle: float
+        :param color: Color of the box.
+        :type color: str
+        :param w: Width of the box.
+        :type w: float
+        :param h: Height of the box.
+        :type h: float
+        """
         super().__init__(name, x, y, angle, type=EntityType.BOX)
         self.visual=patches.Rectangle((0, 0), w, h, angle=0.0, fc=color, label=f"{name}")
         self.contents=[]
         self.update_visual()
     
     def register_visual(self, ax: Axes):
+        """
+        Register the visual representation of the box in the given Axes.
+
+        :param ax: Axes where the visual representation will be registered.
+        :type ax: matplotlib.axes.Axes    
+        """
         ax.add_patch(self.visual)
     
     def update_visual(self):
+        """
+        Update the visual representation of the box.
+        """
         #Set body position
         w = self.visual.get_width()
         h = self.visual.get_height()
@@ -161,9 +352,21 @@ class Box(Entity):
         self.visual.angle = self.angle
     
     def set_color(self, color):
+        """
+        Set the color of the box.
+
+        :param color: Color of the box.
+        :type color: str
+        """
         self.visual[0].set_color(color)
     
     def set_alpha(self, alpha):
+        """
+        Set the transparency of the box entity in the visual representation.
+
+        :param alpha: Transparency of the box, between 0 (transparent) and 1 (opaque).
+        :type alpha: float
+        """
         self.visual[0].set_alpha(alpha)
         self.visual[1].set_alpha(alpha)
 
@@ -183,7 +386,22 @@ class Sim(object):
     """
 
     def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
-        """Create the different objects present in the Simulator and place them in it"""
+        """
+        Create the different objects present in the Simulator and place them in it.
+
+        :param x_size: Size of the plot in the x axis.
+        :type x_size: tuple
+        :param y_size: Size of the plot in the y axis.
+        :type y_size: tuple
+        :param x_bounds: Movement limits in the x axis.
+        :type x_bounds: tuple
+        :param y_bounds: Movement limits in the y axis.
+        :type y_bounds: tuple
+        :param visualize: If True, the simulator will visualize the objects in a plot.
+        :type visualize: bool
+        :param verbose: If True, the simulator will print debug information.
+        :type verbose: bool
+        """
         self.verbose=verbose
 
         #Plot and experimental area bounds
@@ -226,10 +444,23 @@ class Sim(object):
             plt.axvline(x=self.x_bounds[0], ymin=self.y_bounds[0]/self.y_plt_bounds[1], ymax=self.y_bounds[1]/self.y_plt_bounds[1], linestyle='--', color='grey')
 
     def plot_entities(self):
+        """
+        Plot the generated entities.
+        """
         for entity in reversed(self.entities):
             entity.register_visual(self.ax)
 
-    def get_close_entities(self, entity:Entity, threshold):        
+    def get_close_entities(self, entity:Entity, threshold):
+        """
+        Get a list of entities that are close to the given entity within a certain threshold.
+
+        :param entity: Entity to which we want to find close entities.
+        :type entity: simulators.scenarios_2D.Entity
+        :param threshold: Distance threshold to consider an entity as close.
+        :type threshold: float
+        :return: List of entities that are close to the given entity.
+        :rtype: list of simulators.scenarios_2D.Entity
+        """    
         close_list=[]
         ent_list= [ent for ent in self.entities if ent!=entity]
         for ent in ent_list:
@@ -239,21 +470,44 @@ class Sim(object):
         return close_list
 
     def filter_entities(self, entities, type):
+        """
+        Filter entities by type.
+
+        :param entities: List of entities to filter.
+        :type entities: list of simulators.scenarios_2D.Entity
+        :param type: Type of entity to filter by.
+        :type type: simulators.scenarios_2D.EntityType
+        :return: List of entities of the specified type.
+        :rtype: list of simulators.scenarios_2D.Entity
+        """
         return [entity for entity in entities if entity.type == type]
 
     def apply_action(self, **params):
-        """Placeholder method: Implement the action logic according to the desired scenario"""
+        """
+        Placeholder method: Implement the action logic according to the desired scenario.
+        """
         self.world_rules()
         if self.visualize:
             self.fig.canvas.draw()
             plt.pause(0.01)
 
     def world_rules(self):
-        """Placeholder method: Implement the desired world logic according to the desired scenario"""
+        """
+        Placeholder method: Implement the desired world logic according to the desired scenario.
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
 
     def enforce_limits(self, entity: Entity, limits):
-        """Check if the next position of one of the entities is inside its movement limits"""
+        """
+        Check if the next position of one of the entities is inside its movement limits.
+
+        :param entity: Entity to check the limits.
+        :type entity: simulators.scenarios_2D.Entity
+        :param limits: Movement limits of the entity, in the form ((x_min, x_max), (y_min, y_max)).
+        :type limits: tuple of tuples
+        """
         (x, y) = entity.get_pos()
         (x_min, x_max) = limits[0]
         (y_min, y_max) = limits[1]      
@@ -275,30 +529,67 @@ class Sim(object):
             entity.set_pos(x, y)
 
     def get_sensorization(self):
-        """Return a sensorization vector with the distance between the object in which the robot is focused and its
-         actuator, the color of this object..."""
+        """
+        Return a sensorization vector with the distance between the object in which the robot is focused and its
+        actuator, the color of this object...
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+         """
         raise NotImplementedError
 
     def get_scenario_data(self):
-        """Scenario data needed to predict future states using the world model"""
+        """
+        Scenario data needed to predict future states using the world model.
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
 
 
     def restart_scenario(self):
-        """Set the scenario to the desired initial conditions"""
+        """
+        Set the scenario to the desired initial conditions.
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
 
     def restart_scenario_partially(self):
-        """Partially reinitialize the scenario"""
+        """
+        Partially reinitialize the scenario.
+
+        :raises NotImplementedError: If the method is not implemented in the subclass.
+        """
         raise NotImplementedError
 
     @staticmethod
     def normalize_value(value, max_value, min_value=0.0):
+        """
+        Normalize a value between 0 and 1, given a maximum and minimum value.
+
+        :param value: Value to normalize.
+        :type value: float
+        :param max_value: Maximum value for normalization.
+        :type max_value: float
+        :param min_value: Minimum value for normalization.
+        :type min_value: float
+        :return: Normalized value.
+        :rtype: float
+        """
         return (value - min_value) / (max_value - min_value)
 
     @staticmethod
     def get_relative_angle(x1_y1, x2_y2):
-        """Return the relative angle between two points"""
+        """
+        Return the relative angle between two points
+
+        :param x1_y1: Tuple with the coordinates of the first point (x1, y1).
+        :type x1_y1: tuple
+        :param x2_y2: Tuple with the coordinates of the second point (x2, y2).
+        :type x2_y2: tuple
+        :return: Relative angle in degrees between the two points.
+        :rtype: float
+        """
         (x1, y1) = x1_y1
         (x2, y2) = x2_y2
         return math.atan2(y2 - y1, x2 - x1) * 180 / math.pi
@@ -308,7 +599,26 @@ class Sim(object):
 
 
 class Baxter2Arms(Sim):
+    """
+    Class that simulates the Baxter robot.
+    """
     def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
+        """
+        Create the Baxter robot with two arms.
+
+        :param x_size: Size of the plot in the x axis.
+        :type x_size: tuple
+        :param y_size: Size of the plot in the y axis.
+        :type y_size: tuple
+        :param x_bounds: Movement limits in the x axis.
+        :type x_bounds: tuple
+        :param y_bounds: Movement limits in the y axis.
+        :type y_bounds: tuple
+        :param visualize: If True, the simulator will visualize the objects in a plot.
+        :type visualize: bool
+        :param verbose: If True, the simulator will print debug information.
+        :type verbose: bool
+        """
         super().__init__(x_size, y_size, x_bounds, y_bounds, visualize, verbose)
         #Define objects in simulation
         ## Baxter
@@ -320,21 +630,52 @@ class Baxter2Arms(Sim):
         self.entities.extend(self.robots) #Include robots in entities list
 
     def move_robot_arm(self, arm:Robot, vel):
-        """Move robot arm wih a specific velocity"""
+        """
+        Move robot arm wih a specific velocity.
+
+        :param arm: Robot entity to move.
+        :type arm: simulators.scenarios_2D.Robot
+        :param vel: Velocity to move the arm.
+        :type vel: float
+        """
         x, y = arm.get_pos()
         arm.set_pos(x + vel * math.cos(arm.angle * math.pi / 180),
                                   y + vel * math.sin(arm.angle * math.pi / 180))
 
     def robot_arm_action(self, arm: Robot, relative_angle, vel, step_world=True):
-        """Move robot arm with a specific angle and velocity"""
+        """
+        Move robot arm with a specific angle and velocity.
+
+        :param arm: Robot entity to move.
+        :type arm: simulators.scenarios_2D.Robot
+        :param relative_angle: Relative angle to move the arm.
+        :type relative_angle: float
+        :param vel: Velocity to move the arm.
+        :type vel: float
+        """
         angle = arm.angle + relative_angle
         arm.set_angle(angle)
         self.move_robot_arm(arm, vel)
         if step_world:
             self.world_rules()
 
-    def apply_action(self, rel_angle_l=0, rel_angle_r=0, vel_left=0, vel_right=0, gripper_left=False, gripper_right=False):
-        """Move arms with a specific angle and velocity (default 0)"""
+    def apply_action(self, rel_angle_l=0.0, rel_angle_r=0.0, vel_left=0.0, vel_right=0, gripper_left=False, gripper_right=False):
+        """
+        Move arms with a specific angle and velocity (default 0).
+
+        :param rel_angle_l: Relative angle to move the left arm.
+        :type rel_angle_l: float
+        :param rel_angle_r: Relative angle to move the right arm.
+        :type rel_angle_r: float
+        :param vel_left: Velocity to move the left arm.
+        :type vel_left: float
+        :param vel_right: Velocity to move the right arm.
+        :type vel_right: float
+        :param gripper_left: Gripper state of the left arm (True if closed, False otherwise).
+        :type gripper_left: bool
+        :param gripper_right: Gripper state of the right arm (True if closed, False otherwise).
+        :type gripper_right: bool
+        """
         self.robot_arm_action(self.baxter_left, rel_angle_l, vel_left, step_world=False)
         self.robot_arm_action(self.baxter_right, rel_angle_r, vel_right, step_world=False)
         self.baxter_left.set_gripper(gripper_left)
@@ -348,7 +689,24 @@ class Baxter2Arms(Sim):
 
 
 class ComplexScenario(Baxter2Arms):
+    """
+    Class that implements a complex scenario with a Baxter robot and multiple balls and boxes.
+    """
     def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True):
+        """
+        Create the complex scenario with a Baxter robot, multiple balls and boxes.
+
+        :param x_size: Size of the plot in the x axis.
+        :type x_size: tuple
+        :param y_size: Size of the plot in the y axis.
+        :type y_size: tuple
+        :param x_bounds: Movement limits in the x axis.
+        :type x_bounds: tuple
+        :param y_bounds: Movement limits in the y axis.
+        :type y_bounds: tuple
+        :param visualize: If True, the simulator will visualize the objects in a plot.
+        :type visualize: bool
+        """
         super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
         ##Objects
         self.objects=[]
@@ -371,7 +729,9 @@ class ComplexScenario(Baxter2Arms):
         self.plot_entities()
 
     def world_rules(self):
-        """Establish the ball position in the scenario"""
+        """
+        Establish the ball position in the scenario.
+        """
 
         #Enforce position bounds
         self.enforce_limits(self.baxter_left, self.baxter_left_limits)
@@ -398,7 +758,26 @@ class ComplexScenario(Baxter2Arms):
 
 
 class SimpleScenario(Baxter2Arms):
+    """
+    Class that implements a simple scenario with a Baxter robot and a ball.
+    """
     def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, logger=None):
+        """
+        Create the simple scenario with a Baxter robot and a ball.
+
+        :param x_size: Size of the plot in the x axis.
+        :type x_size: tuple
+        :param y_size: Size of the plot in the y axis.
+        :type y_size: tuple
+        :param x_bounds: Movement limits in the x axis.
+        :type x_bounds: tuple
+        :param y_bounds: Movement limits in the y axis.
+        :type y_bounds: tuple
+        :param visualize: If True, the simulator will visualize the objects in a plot.
+        :type visualize: bool
+        :param logger: Logger to log debug information.
+        :type logger: rclpy.impl.rcutils_logger.RcutilsLogger
+        """
         super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
         self.logger:RcutilsLogger=logger
         ##Objects
@@ -416,7 +795,9 @@ class SimpleScenario(Baxter2Arms):
             plt.pause(0.001)
 
     def world_rules(self):
-        """Establish the ball position in the scenario"""
+        """
+        Establish the ball position in the scenario
+        """
 
         #Enforce position bounds
         self.enforce_limits(self.baxter_left, self.baxter_left_limits)
@@ -461,6 +842,12 @@ class SimpleScenario(Baxter2Arms):
                 self.logger.info(f"{obj.name} is at position {obj.get_pos()}")
 
     def restart_scenario(self, rng:Generator):
+        """
+        Set the scenario to random initial conditions.
+
+        :param rng: Random number generator.
+        :type rng: numpy.random.Generator
+        """
         self.baxter_left.set_pos(rng.uniform(self.baxter_left_limits[0][0], self.baxter_left_limits[0][1]), rng.uniform(self.baxter_left_limits[1][0], self.baxter_left_limits[1][1]))
         self.baxter_right.set_pos(rng.uniform(self.baxter_right_limts[0][0], self.baxter_right_limts[0][1]), rng.uniform(self.baxter_right_limts[1][0], self.baxter_right_limts[1][1])) 
         self.baxter_left.set_gripper(False)

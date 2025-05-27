@@ -17,7 +17,9 @@ from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWi
 from core.utils import class_from_classname
 
 class World(Enum):
-    """Worlds to be simulated."""
+    """
+    Worlds to be simulated.
+    """
     GRIPPER_AND_LOW_FRICTION = 1
     NO_GRIPPER_AND_HIGH_FRICTION = 2
     GRIPPER_AND_LOW_FRICTION_TWO_BOXES = 3
@@ -27,7 +29,9 @@ class World(Enum):
     GRIPPER_AND_LOW_FRICTION_OBSTACLE = 7
 
 class Item(Enum):
-    """Types of objects."""
+    """
+    Types of objects.
+    """
 
     CYLINDER = 1
     BOX = 2
@@ -44,8 +48,13 @@ class Item(Enum):
     BANANA = 13
 
 class LTMSim(Node):
+    """
+    ObjectInBox simulator class.
+    """
     def __init__(self):
-        """Init attributes when a new object is created."""
+        """
+        Init attributes when a new object is created.
+        """
         super().__init__("LTMSim")
         self.rng = None
         self.ident = None
@@ -100,19 +109,25 @@ class LTMSim(Node):
         
 
     def load_experiment_file_in_commander(self):
+        """
+        Load the configuration file in the commander node.
+
+        :return: Response from the commander node indicating the success of the loading.
+        :rtype: core_interfaces.srv.LoadConfig.Response
+        """
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
 
     def calculate_closest_position_callback(self, request, response):
         """
-        The callback to calculate the closest feasible position with a given object angle
+        The callback to calculate the closest feasible position with a given object angle.
 
-        :param request: The Request that includes the angle to the object
-        :type request: simulators_interfaces.srv.CalculateClosestPosition_Request
-        :param response: The Response that includes the closest distance and angle
-        :type response: simulators_interfaces.srv.CalculateClosestPosition_Response
-        :return: The Response that includes the closest distance and angle
-        :rtype: simulators_interfaces.srv.CalculateClosestPosition_Response
+        :param request: The Request that includes the angle to the object.
+        :type request: simulators_interfaces.srv.CalculateClosestPosition.Request
+        :param response: The Response that includes the closest distance and angle.
+        :type response: simulators_interfaces.srv.CalculateClosestPosition.Response
+        :return: The Response that includes the closest distance and angle.
+        :rtype: simulators_interfaces.srv.CalculateClosestPosition.Response
         """
         ang = request.angle
         dist_near, ang_near = self.calculate_closest_position(ang)
@@ -124,10 +139,10 @@ class LTMSim(Node):
         """
         Calculate the closest feasible position for an object taking into account the angle.
 
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: The closest distance and angle
-        :rtype: float, float
+        :return: The closest distance and angle.
+        :rtype: tuple
         """
         dist = self.normal_inner(abs(ang))
         y_coord = dist * math.sin(ang)
@@ -144,14 +159,14 @@ class LTMSim(Node):
     
     def object_pickable_with_two_hands_callback(self, request, response):
         """
-        The callback to calculate if an object can be pickable with two hands
+        The callback to calculate if an object can be pickable with two hands.
 
-        :param request: The Request that includes the distance and angle to the object
-        :type request: simulators_interfaces.srv.ObjectPickableWithTwoHands_Request
-        :param response: The Response that indicates if the object is pickable or not
-        :type response: simulators_interfaces.srv.ObjectPickableWithTwoHands_Response
-        :return: The Response that indicates if the object is pickable or not
-        :rtype: simulators_interfaces.srv.ObjectPickableWithTwoHands_Response
+        :param request: The Request that includes the distance and angle to the object.
+        :type request: simulators_interfaces.srv.ObjectPickableWithTwoHands.Request
+        :param response: The Response that indicates if the object is pickable or not.
+        :type response: simulators_interfaces.srv.ObjectPickableWithTwoHands.Response
+        :return: The Response that indicates if the object is pickable or not.
+        :rtype: simulators_interfaces.srv.ObjectPickableWithTwoHands.Response
         """
         dist = request.distance
         ang = request.angle
@@ -164,28 +179,36 @@ class LTMSim(Node):
         """
         Return True if the object is in a place where it can be picked with two hands.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: Value that indicates if the object is pickable or not
+        :return: Value that indicates if the object is pickable or not.
         :rtype: bool
         """
         return abs(ang) <= 0.3925 and 0.46 <= dist <= 0.75
     
     def object_pickable(self):
+        """
+        Check if an object is in a place where it can be picked.
+
+        :return: A value that indicates if the object is in a place where it can be picked or not.
+        :rtype: bool
+        """
+
+        #TODO: Does this method work properly?
         return self.object_too_close() or self.object_too_far()
     
     def object_too_far_callback(self, request, response):
         """
-        The callback to calculate if and object is out of range of the robot
+        The callback to calculate if and object is out of range of the robot.
 
-        :param request: The Request that includes the distance and angle to the object
-        :type request: simulators_interfaces.srv.ObjectTooFar_Request
-        :param response: The Response that indicates if the object if out of the range or not
-        :type response: simulators_interfaces.srv.ObjectTooFar_Response
-        :return: The Response that indicates if the object if out of the range or not
-        :rtype: simulators_interfaces.srv.ObjectTooFar_Response
+        :param request: The Request that includes the distance and angle to the object.
+        :type request: simulators_interfaces.srv.ObjectTooFar.Request
+        :param response: The Response that indicates if the object if out of the range or not.
+        :type response: simulators_interfaces.srv.ObjectTooFar.Response
+        :return: The Response that indicates if the object if out of the range or not.
+        :rtype: simulators_interfaces.srv.ObjectTooFar.Response
         """
         dist = request.distance
         ang = request.angle
@@ -197,9 +220,7 @@ class LTMSim(Node):
         """
         Check if an object is held with the left hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.perceptions['ball_in_left_hand'].data
@@ -208,9 +229,7 @@ class LTMSim(Node):
         """
         Check if an object is held with the right hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.perceptions['ball_in_right_hand'].data
@@ -219,9 +238,7 @@ class LTMSim(Node):
         """
         Check if an object is held with one hand.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is held or not
+        :return: A value that indicates if the object is held or not.
         :rtype: bool
         """
         return self.object_held_with_left_hand() or self.object_held_with_right_hand()
@@ -230,8 +247,6 @@ class LTMSim(Node):
         """
         Check if an object is held with two hands.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
         :return: A value that indicates if the object is held or not
         :rtype: bool
         """
@@ -244,9 +259,7 @@ class LTMSim(Node):
         """
         Check if an object and a box are on the same side.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object is in the same side or not
+        :return: A value that indicates if the object is in the same side or not.
         :rtype: bool
         """
         same_side = False
@@ -262,9 +275,7 @@ class LTMSim(Node):
         """
         Check if an object can be hold with two hands.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object can be hold or not
+        :return: A value that indicates if the object can be hold or not.
         :rtype: bool
         """
         pickable = False
@@ -278,9 +289,7 @@ class LTMSim(Node):
         """
         Check if an object is within the robot's reachable area.
 
-        :param perceptions: The perception given to check
-        :type perceptions: dict
-        :return: A value that indicates if the object can be moved or not
+        :return: A value that indicates if the object can be moved or not.
         :rtype: bool
         """        
         pickable = False
@@ -295,11 +304,11 @@ class LTMSim(Node):
         """
         Return True if the object is out of range of the robot.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: Value that indicates if the object is out of range or not
+        :return: Value that indicates if the object is out of range or not.
         :rtype: bool
         """
         if self.world.name == World.GRIPPER_AND_LOW_FRICTION_SHORT_ARM.name:
@@ -321,11 +330,11 @@ class LTMSim(Node):
         """
         Return True if the object is too close to the robot to be caught.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: Value that indicates if the object is too close or not
+        :return: Value that indicates if the object is too close or not.
         :rtype: bool
         """
         return dist < self.normal_inner(abs(ang))
@@ -335,11 +344,11 @@ class LTMSim(Node):
         """
         Return True if the object is outside the table. This is used in some scripts...
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: Value that indicates if the object is outside of the table or not
+        :return: Value that indicates if the object is outside of the table or not.
         :rtype: bool
         """
         object_y = numpy.sin(ang) * dist
@@ -351,9 +360,9 @@ class LTMSim(Node):
         """
         Return True if the ball is small, False if it is big. Right now, small is 0.03 and big 0.07.
 
-        :param rad: Radius of the ball
+        :param rad: Radius of the ball.
         :type rad: float
-        :return: The value that indicates if the ball is small or not
+        :return: The value that indicates if the ball is small or not.
         :rtype: bool
         """
         return rad <= 0.05
@@ -363,10 +372,10 @@ class LTMSim(Node):
         """
         Calculate the coordinates of the object when moving it to a place where it can be picked with two hands.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :return: The calculated coordinates
-        :rtype: float, float
+        :return: The calculated coordinates.
+        :rtype: tuple
         """
         x_coord = 0
         y_coord = dist
@@ -381,10 +390,10 @@ class LTMSim(Node):
         """
         Calculate the coordinates of the object when moving it out of reach.
 
-        :param dist: The angle to the object
-        :type dist: float
-        :return: The calculated coordinates
-        :rtype: float, float
+        :param ang: The angle to the object.
+        :type ang: float
+        :return: The calculated coordinates.
+        :rtype: tuple
         """
         dist = self.normal_outer(abs(ang))
         y_coord = dist * math.sin(ang)
@@ -403,11 +412,11 @@ class LTMSim(Node):
         """
         Check if there is an object inside of a box.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: The value that indicates if the object is inside of the box or not
+        :return: The value that indicates if the object is inside of the box or not.
         :rtype: bool
         """
         inside = False
@@ -422,11 +431,11 @@ class LTMSim(Node):
         """
         Check if there is an object inside of a box.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: The value that indicates if the object is inside of the box or not
+        :return: The value that indicates if the object is inside of the box or not.
         :rtype: bool
         """
         inside = False
@@ -441,11 +450,11 @@ class LTMSim(Node):
         """
         Check if there is an object adjacent to the robot.
 
-        :param dist: The distance to the object
+        :param dist: The distance to the object.
         :type dist: float
-        :param ang: The angle to the object
+        :param ang: The angle to the object.
         :type ang: float
-        :return: The value that indicates if the object is adjacent or not
+        :return: The value that indicates if the object is adjacent or not.
         :rtype: bool
         """
         together = False
@@ -459,15 +468,15 @@ class LTMSim(Node):
     def avoid_reward_by_chance(self, distance, angle):
         """
         Avoid a reward situation obtained by chance.
+        This is necessary so sweep never puts the object close to the robot or colliding with a box.
 
-        :param distance: The distance to the object
+        :param distance: The distance to the object.
         :type distance: float
-        :param angle: The angle to the object
+        :param angle: The angle to the object.
         :type angle: float
-        :return: The distance value to avoid the reward
+        :return: The distance value to avoid the reward.
         :rtype: float
         """
-        # This is necessary so sweep never puts the object close to the robot or colliding with a box.
         # This is not realistic, it needs to be improved.
         while (
             self.object_with_robot(distance, angle)
@@ -484,7 +493,7 @@ class LTMSim(Node):
         """
         Reward for object in box goal.
 
-        :return: True if there is reward or False if not
+        :return: True if there is reward or False if not.
         :rtype: bool
         """
         #self.perceptions["ball_in_box"].data = False
@@ -496,6 +505,10 @@ class LTMSim(Node):
         return False
     
     def reward_progress_ball_in_box(self):
+        """
+        Gives a larger reward the closer the robot is to the goal of putting the ball in the box.
+        If the ball is in the box, the reward is 1.0.
+        """
         progress=0.0
         if self.reward_ball_in_box():
             progress = 1.0
@@ -516,6 +529,9 @@ class LTMSim(Node):
         self.get_logger().info(f"Progress: {progress}. Perceptions: {self.perceptions}") 
 
     def reward_ball_in_box_goal(self):
+        """
+        Gives a reward of 1.0 if the ball is in the box.
+        """
         progress=0.0
         if self.reward_ball_in_box():
             progress = 1.0
@@ -525,7 +541,7 @@ class LTMSim(Node):
 
     def reward_ball_with_robot(self):
         """
-        Reward for object with robot goal.
+        Gives a reward for object with robot goal.
 
         :return: True if there is reward or False if not
         :rtype: bool
@@ -540,7 +556,7 @@ class LTMSim(Node):
     
     def reward_clean_area(self):
         """
-        Reward for cleaning the table goal.
+        Gives a reward for cleaning the table goal.
 
         :return: True if there is reward or False if not
         :rtype: bool
@@ -558,7 +574,9 @@ class LTMSim(Node):
         return False
 
     def update_reward_sensor(self):
-        """Update goal sensors' values."""
+        """
+        Update goal sensors' values.
+        """
         for sensor in self.perceptions:
             reward_method = getattr(self, "reward_" + sensor, None)
             if callable(reward_method):
@@ -569,12 +587,12 @@ class LTMSim(Node):
         """
         Return a random position in the table.
 
-        :param in_valid: True if the position can be generated close to the robot
+        :param in_valid: True if the position can be generated close to the robot.
         :type in_valid: bool
-        :param out_valid: True if the position can be generated away to the robot
+        :param out_valid: True if the position can be generated away to the robot.
         :type out_valid: bool
-        :return: The distance and angle to the random position generated
-        :rtype: float, float
+        :return: The distance and angle to the random position generated.
+        :rtype: tuple
         """
         #TODO: Solve the ugly hacks to test curriculum learning and check the Sphinx description
         valid = False
@@ -620,7 +638,10 @@ class LTMSim(Node):
     
 
     def random_perceptions(self):
-        """Randomize the state of the environment."""
+        """
+        Randomize the state of the environment.
+        This method is called when the world is initialized or reset.
+        """
         # Objects
         self.catched_object = None
         if self.world in [
@@ -728,7 +749,9 @@ class LTMSim(Node):
         self.update_reward_sensor()
 
     def grasp_object_policy(self):
-        """Grasp an object with a gripper."""
+        """
+        Grasp an object with a gripper.
+        """
         if not self.catched_object:
             for cylinder in self.perceptions["cylinders"].data:
                 if (
@@ -746,7 +769,9 @@ class LTMSim(Node):
                     break
 
     def grasp_with_two_hands_policy(self):
-        """Grasp an object using both arms."""
+        """
+        Grasp an object using both arms.
+        """
         if not self.catched_object:
             for cylinder in self.perceptions["cylinders"].data:
                 if (self.object_pickable_with_two_hands(cylinder.distance, cylinder.angle)) and (
@@ -761,7 +786,9 @@ class LTMSim(Node):
 
 
     def change_hands_policy(self):
-        """Exchange an object from one hand to the other one."""
+        """
+        Exchange an object from one hand to the other one.
+        """
         if self.perceptions["ball_in_left_hand"].data and (
             not self.perceptions["ball_in_right_hand"].data
         ):
@@ -782,7 +809,9 @@ class LTMSim(Node):
             )
 
     def sweep_object_policy(self):
-        """Sweep an object to the front of the robot."""
+        """
+        Sweep an object to the front of the robot.
+        """
         if not self.catched_object:
             for cylinder in self.perceptions["cylinders"].data:
                 if not self.object_too_far(cylinder.distance, cylinder.angle):
@@ -801,7 +830,9 @@ class LTMSim(Node):
                     break
 
     def put_object_in_box_policy(self):
-        """Put an object into the box."""
+        """
+        Put an object into the box.
+        """
         if self.catched_object:
             for box in self.perceptions["boxes"].data:
                 if (not self.object_too_far(box.distance, box.angle)) and (
@@ -816,7 +847,9 @@ class LTMSim(Node):
                     break
 
     def put_object_with_robot_policy(self):
-        """Put an object as close to the robot as possible."""
+        """
+        Put an object as close to the robot as possible.
+        """
         if self.catched_object:
             (
                 self.catched_object.distance,
@@ -831,7 +864,9 @@ class LTMSim(Node):
             self.catched_object = None
 
     def throw_policy(self):
-        """Throw an object."""
+        """
+        Throw an object towards a box.
+        """
         if self.catched_object:
             for box in self.perceptions["boxes"].data:
                 if self.object_too_far(box.distance, box.angle) and (
@@ -850,7 +885,9 @@ class LTMSim(Node):
                     break
 
     def ask_nicely_policy(self):
-        """Ask someone to bring the object closer to us."""
+        """
+        Ask someone to bring the object closer to the robot.
+        """
         if not self.catched_object:
             for cylinder in self.perceptions["cylinders"].data:
                 if self.object_too_far(cylinder.distance, cylinder.angle):
@@ -873,6 +910,13 @@ class LTMSim(Node):
                     break
     
     def reset_world(self, data):
+        """
+        Reset the world to a random state.
+
+        :param data: The message that contains the command to reset the world. It is not used.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
+        cognitive_processes_interfaces.srv.WorldReset.Request
+        """
         self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         self.last_reset_iteration = data.iteration
         self.world = World[data.world]
@@ -888,10 +932,10 @@ class LTMSim(Node):
     
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received.
 
-        :param data: The message that contais the command received
-        :type data: ROS msg defined in setup_control_channel
+        :param data: The message that contais the command received.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         if data.command == "reset_world":
@@ -901,11 +945,24 @@ class LTMSim(Node):
             rclpy.shutdown()
 
     def publish_perceptions(self):
+        """
+        Publish the current perceptions to the corresponding topics.
+        """
         for ident, publisher in self.sim_publishers.items():
             self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
 
     def world_reset_service_callback(self, request, response):
+        """
+        Callback for the world reset service.
+
+        :param request: The message that contains the request to reset the world.
+        :type request: ROS msg defined in the config file Typically cognitive_processes_interfaces.srv.WorldReset.Request
+        :param response: Response of the world reset service.
+        :type response: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        :return: Response indicating the success of the world reset.
+        :rtype: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        """
         self.reset_world(request)
         response.success=True
         return response
@@ -914,8 +971,8 @@ class LTMSim(Node):
         """
         Execute a policy and publish new perceptions.
 
-        :param data: The message that contains the policy to execute
-        :type data: ROS msg defined in setup_control_channel
+        :param data: The message that contains the policy to execute.
+        :type data: ROS msg defined in the config file. 
         """
         self.get_logger().info("Executing policy " + str(data.data))
         getattr(self, data.data + "_policy")()
@@ -932,10 +989,12 @@ class LTMSim(Node):
         """
         Execute a policy and publish new perceptions.
 
-        :param request: The message that contains the policy to execute
-        :type request: ROS srv defined in setup_control_channel
-        :param response: Response of the success of the execution of the action
-        :type response: ROS srv defined in setup_control_channel
+        :param request: The message that contains the policy to execute.
+        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Request
+        :param response: Response of the success of the execution of the action.
+        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
+        :return: Response indicating the success of the action execution.
+        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
         """
         self.get_logger().info("Executing policy " + str(request.policy))
         getattr(self, request.policy + "_policy")()
@@ -954,7 +1013,7 @@ class LTMSim(Node):
         """
         Configure the ROS topic/service where listen for commands to be executed.
 
-        :param simulation: The params from the config file to setup the control channel
+        :param simulation: The params from the config file to setup the control channel.
         :type simulation: dict
         """
         self.ident = simulation["id"]
@@ -987,7 +1046,7 @@ class LTMSim(Node):
         """
         Configure the ROS publishers where publish perception values.
 
-        :param perceptions: The params from the config file to setup the perceptions
+        :param perceptions: The params from the config file to setup the perceptions.
         :type perceptions: dict
         """
         for perception in perceptions:
@@ -1009,11 +1068,6 @@ class LTMSim(Node):
     def load_configuration(self):
         """
         Load configuration from a file.
-
-        :param random_seed: The seed for the random numbers generation
-        :type random_seed: int
-        :param config_file: The file with the params to configurate the simulation
-        :type config_file: yaml file
         """
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")

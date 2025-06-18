@@ -430,7 +430,7 @@ class FruitShopSim(Node):
 
         :param data: The message that contains the command to reset the world. It is not used.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
-        cognitive_processes_interfaces.srv.WorldReset.Request
+            cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info("Resetting world...")
         self.fruit_correctly_accepted = False

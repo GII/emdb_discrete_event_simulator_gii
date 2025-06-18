@@ -914,8 +914,8 @@ class LTMSim(Node):
         Reset the world to a random state.
 
         :param data: The message that contains the command to reset the world. It is not used.
-        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
-        cognitive_processes_interfaces.srv.WorldReset.Request
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or 
+            cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         self.last_reset_iteration = data.iteration

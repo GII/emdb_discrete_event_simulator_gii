@@ -626,7 +626,7 @@ class Baxter2Arms(Sim):
         self.baxter_right=Robot("baxter_right", 1800, 300, 90)
         self.robots=[self.baxter_left, self.baxter_right]
         self.baxter_left_limits=((100, 1250),self.y_bounds)
-        self.baxter_right_limts=((1050, 2400),self.y_bounds)
+        self.baxter_right_limits=((1250, 2400),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
 
     def move_robot_arm(self, arm:Robot, vel):
@@ -735,7 +735,7 @@ class ComplexScenario(Baxter2Arms):
 
         #Enforce position bounds
         self.enforce_limits(self.baxter_left, self.baxter_left_limits)
-        self.enforce_limits(self.baxter_right, self.baxter_right_limts)
+        self.enforce_limits(self.baxter_right, self.baxter_right_limits)
         for object in self.objects:
             self.enforce_limits(object, (self.x_bounds, self.y_bounds))
         #Check for grasps
@@ -801,7 +801,7 @@ class SimpleScenario(Baxter2Arms):
 
         #Enforce position bounds
         self.enforce_limits(self.baxter_left, self.baxter_left_limits)
-        self.enforce_limits(self.baxter_right, self.baxter_right_limts)
+        self.enforce_limits(self.baxter_right, self.baxter_right_limits)
         for object in self.objects:
             self.enforce_limits(object, (self.x_bounds, self.y_bounds))
         #Check for grasps
@@ -849,19 +849,21 @@ class SimpleScenario(Baxter2Arms):
         :type rng: numpy.random.Generator
         """
         self.baxter_left.set_pos(rng.uniform(self.baxter_left_limits[0][0], self.baxter_left_limits[0][1]), rng.uniform(self.baxter_left_limits[1][0], self.baxter_left_limits[1][1]))
-        self.baxter_right.set_pos(rng.uniform(self.baxter_right_limts[0][0], self.baxter_right_limts[0][1]), rng.uniform(self.baxter_right_limts[1][0], self.baxter_right_limts[1][1])) 
+        self.baxter_right.set_pos(rng.uniform(self.baxter_right_limits[0][0], self.baxter_right_limits[0][1]), rng.uniform(self.baxter_right_limits[1][0], self.baxter_right_limits[1][1])) 
         self.baxter_left.set_gripper(False)
         self.baxter_right.set_gripper(False)
-        self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+        
         self.box1.contents=[]
         #TODO: Reset grippers
 
-        for object in self.objects:
-            object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
-            object.catched_by=None
+        first_shuffle=True
+        while any([distance.euclidean(self.box1.get_pos(), obj.get_pos()) < 50 for obj in self.objects]) or first_shuffle:
+            self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+            for object in self.objects:
+                object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+                object.catched_by=None
+            first_shuffle=False
 
-        
-    
 
 if __name__ == '__main__':
     """Simulator Demo"""

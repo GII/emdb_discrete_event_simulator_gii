@@ -26,7 +26,8 @@ class BartenderSim(Node):
         self.perceptions = {}
         self.sim_publishers = {}
         self.bar_clients = []
-        self.beverages = []
+        self.bottles = []
+        self.glasses = []
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
@@ -89,7 +90,7 @@ class BartenderSim(Node):
 
     def generate_clients(self):
         """
-        Generate clients with random beverages preferences.
+        Generate clients with random bottles preferences.
         """
         self.get_logger().info("Generating clients...")
         ids = numpy.random.choice(3, size=3, replace=False)
@@ -102,17 +103,26 @@ class BartenderSim(Node):
             self.bar_clients.append(client)
             ident += 1
 
-    def generate_beverages(self,n_beverages=3):
+    def generate_bottles(self,n_bottles=3):
         """
-        Generate beverages in random positions, within the bar area, only one beverage per kind.
-        :param n_beverages: Number of beverages to generate.
-        :type n_beverages: int
+        Generate bottles in random positions, within the bar area, only one beverage per kind.
+        :param n_bottles: Number of bottles to generate.
+        :type n_bottles: int
         """
-        self.get_logger().info("Generating beverages...")
-        for i in range(n_beverages):
+        self.get_logger().info("Generating bottles...")
+        for i in range(n_bottles):
             distance, angle = self.random_position(self.collection_area)
-            beverage = dict(distance=distance, angle=angle, id=i)
-            self.beverages.append(beverage)
+            bottle = dict(distance=distance, angle=angle, id=i)
+            self.bottles.append(bottle)
+
+    def generate_glass(self):
+        """
+        generates one glass in random position within the bar area
+        """
+        self.get_logger().info("Generating glass...")
+        distance, angle = self.random_position(self.collection_area)
+        glass = dict(distance=distance, angle=angle)
+        self.glasses.append(glass)
 
     def generate_fruits(self, n_fruits, scale = None):
         """
@@ -173,25 +183,71 @@ class BartenderSim(Node):
             
             self.fruits.append(fruit)
 
-
-
-
-    def perceive_bottle(self):
+    def perceive_bottles(self):
         """
-        Choose the bottle, update the bottle perceptions accordingly.
+        Choose the bottles, update the bottle perceptions accordingly.
         """
         self.get_logger().info("Perceiving bottles...")
         
+        # Ensure we have enough perception slots for all bottles
+        if self.bottles:
+            # Make sure we have enough perception data slots
+            needed_slots = len(self.bottles)
+            current_slots = len(self.perceptions["bottles"].data)
+            
+            # Add more slots if needed
+            while current_slots < needed_slots:
+                self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
+                current_slots += 1
+            
+            # Update the perception data
+            for i, bottle in enumerate(self.bottles):
+                self.perceptions["bottles"].data[i].distance = bottle["distance"]
+                self.perceptions["bottles"].data[i].angle = bottle["angle"]
+                # Set the ID if the perception message has an id field
+                if hasattr(self.perceptions["bottles"].data[i], 'id'):
+                    self.perceptions["bottles"].data[i].id = bottle["id"]
+        else:
+            # If no bottles, create default perception data
+            self.perceptions["bottles"].data = [self.base_messages["bottles"]() for _ in range(3)]
+
+    def perceive_last_bottle(self):
+        """
+        Choose the bottle, update the bottle perceptions accordingly.
+        """
+        self.get_logger().info("Perceiving last bottle...")
+        
+        # Add client WorldModel processing logic here
+
         # Use existing last_bottle perception or generate random if not available
-        if "last_bottle" in self.perceptions and self.perceptions["last_bottle"].data is not None:
+        if ("last_bottle" in self.perceptions and self.perceptions["last_bottle"].data is not None) and (self.perceptions["last_bottle"].data != False):
             bottle_id = self.perceptions["last_bottle"].data
         else:
-            bottle_id = self.rng.integers(0, 3)  # Random value 0, 1, or 2
+            bottle_id = int(self.rng.integers(0, 3))  # Random value 0, 1, or 2
             if "last_bottle" in self.perceptions:
                 self.perceptions["last_bottle"].data = bottle_id
         
         self.get_logger().info(f"Using bottle ID: {bottle_id}")
-        # Add bottle processing logic here
+
+    def perceive_glass(self):
+        """
+        Perceive the glass and update the perception accordingly.
+        """
+        self.get_logger().info("Perceiving glass...")
+        
+        if self.glasses:
+            # Ensure we have enough perception slots for the glass
+            if len(self.perceptions["glass"].data) < 1:
+                self.perceptions["glass"].data.append(self.base_messages["glass"]())
+            
+            # Update the perception data
+            self.perceptions["glass"].data[0].distance = self.glasses[0]["distance"]
+            self.perceptions["glass"].data[0].angle = self.glasses[0]["angle"]
+        else:
+            # If no glass, create default perception data
+            self.perceptions["glass"].data = [self.base_messages["glass"]()]
+
+        
             
 
     def perceive_closest_fruit(self):
@@ -229,19 +285,24 @@ class BartenderSim(Node):
         self.perceptions["scales"].data[0].active = False
         # Generate fruits
         self.fruits = []
-        self.beverages = []
+        self.bottles = []
         n_fruits = self.rng.integers(0,4)
         self.perceptions["fruits"].data = []
         self.perceptions["fruits"].data.append(self.base_messages["fruits"]())
         self.perceptions["client"].data = numpy.random.randint(0, 3)
-        # Generate fruits, clients and beverages
+        self.perceptions["bottles"].data = []
+        self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
+        # Generate fruits, clients and bottles
         self.generate_fruits(n_fruits, self.perceptions['scales'].data[0])
         self.generate_clients()
-        self.generate_beverages()
+        self.generate_bottles()
+        self.generate_glass()
 
-
+        # Perceive the environment
         self.perceive_closest_fruit()
-        self.perceive_bottle()
+        self.perceive_bottles()
+        self.perceive_last_bottle()
+        self.perceive_glass()
 
         
         self.perceptions["fruit_in_right_hand"].data = False
@@ -695,4 +756,4 @@ def main(args=None):
         sim.destroy_node()
 
 if __name__ == '__main__':
-    main()       
+    main()

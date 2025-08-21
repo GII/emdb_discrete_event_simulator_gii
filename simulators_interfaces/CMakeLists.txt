@@ -22,6 +22,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PumpPanelMsg.msg"
   "msg/ScaleListMsg.msg"
   "msg/ScaleMsg.msg"
+  "msg/BottleListMsg.msg"
+  "msg/BottleMsg.msg"
   "srv/CalculateClosestPosition.srv"
   "srv/ObjectPickableWithTwoHands.srv"
   "srv/ObjectTooFar.srv"

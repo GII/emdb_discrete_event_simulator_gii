@@ -28,6 +28,8 @@ class BartenderSim(Node):
         self.bar_clients = []
         self.bottles = []
         self.glasses = []
+        self.know_preference = {}
+        self.perceptions["robot_position"] = numpy.random.randint(0, 1) # Random initial position of the robot, 0 = preparation table, 1 = serving table
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
@@ -304,7 +306,10 @@ class BartenderSim(Node):
         self.perceive_last_bottle()
         self.perceive_glass()
 
-        
+
+        self.perceptions["glass_in_left_hand"].data = False
+        self.perceptions["bottle_in_right_hand"].data = False
+
         self.perceptions["fruit_in_right_hand"].data = False
         self.perceptions["fruit_in_left_hand"].data = False
         if self.rng.uniform() > 0.5 and self.fruits:
@@ -320,7 +325,48 @@ class BartenderSim(Node):
         self.perceptions["button_light"].data = False if self.rng.uniform() > 0.5 else True
 
         self.update_reward_sensor()
-    
+
+    def pick_glass_policy(self):
+        """
+        Pick the glass.
+        """
+        if not self.perceptions["glass_in_left_hand"].data and self.glasses:
+            self.perceptions["glass_in_left_hand"].data = True if self.perceptions["glass"].data[0].angle <= 0.0 else False
+
+    def pick_bottle_policy(self):
+        """Pick the bottle.
+        TODO: Implement the WorldModel reading"""
+        if self.know_preference.get(self.perceptions["client"].data, None) is not None:
+            self.perceptions["bottle_in_right_hand"].data = True if self.know_preference[self.perceptions["client"].data] == self.perceptions["bottles"].data[0].id else False
+            self.perceptions["last_bottle"].data = int(self.bar_clients[self.perceptions["client"].data]["beverage"])
+
+    def prepare_drink_policy(self):
+        """
+        Prepare the beverage for the client.
+        """
+        # check if is bottle and glass in the hands
+        if self.perceptions["glass_in_left_hand"].data and self.perceptions["bottle_in_right_hand"].data:
+            if self.know_preference.get(self.perceptions["client"].data, None) is not None:
+                self.perceptions["glass"].data[0].state = True
+
+    def place_object_policy(self):
+        """
+        Place the object on the table.
+        """
+        if self.perceptions["glass_in_left_hand"].data:
+            self.perceptions["glass"].data[0].state = False
+        if self.perceptions["bottle_in_right_hand"].data:
+            self.perceptions["bottles"].data[0].state = False
+
+    def move_to_policy(self):
+        """
+        Move the robot to the desired position.
+        """
+        if self.perceptions["robot_position"].data == 0:
+            self.perceptions["robot_position"].data = 1
+        elif self.perceptions["robot_position"].data == 1:
+            self.perceptions["robot_position"].data = 0
+
     def pick_fruit_policy(self):
         """
         Pick the closest fruit to the robot.
@@ -400,11 +446,11 @@ class BartenderSim(Node):
 
     def ask_nicely_policy(self):
         """
-        Ask the experimenter to provide more fruits if there are none available.
+        Ask the the client the preferred beverage.
         """
-        if not self.fruits:
-            n_fruits = self.rng.integers(1,4)
-            self.generate_fruits(n_fruits, None)
+        if not self.know_preference.get(self.perceptions["client"].data, None):
+            self.know_preference[self.perceptions["client"].data] = self.bar_clients[self.perceptions["client"].data]["beverage"]
+
 
     def accept_fruit_policy(self):
         """
@@ -509,14 +555,14 @@ class BartenderSim(Node):
             self.perceptions["progress_classify_fruit_goal"].data = progress
 
 
-    def reward_place_fruit_goal(self):
+    def reward_serve_glass_goal(self):
         """
-        Gives a reward of 1.0 if the fruit is placed in the center of the table.
+        Gives a reward of 1.0 if the glass is placed in the serving table .
         """
         reward = 0.0 
         if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
-            self.get_logger().info("STAGE 1 REWARD: PLACE FRUIT")
-            if self.fruit_in_placed_pos():
+            self.get_logger().info("STAGE 1 REWARD: PLACE GLASS")
+            if self.glass_in_placed_pos():
                 reward = 1.0
                 
         else:

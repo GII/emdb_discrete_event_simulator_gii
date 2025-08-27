@@ -24,6 +24,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ScaleMsg.msg"
   "msg/BottleListMsg.msg"
   "msg/BottleMsg.msg"
+  "msg/GlassListMsg.msg"
+  "msg/GlassMsg.msg"
   "srv/CalculateClosestPosition.srv"
   "srv/ObjectPickableWithTwoHands.srv"
   "srv/ObjectTooFar.srv"

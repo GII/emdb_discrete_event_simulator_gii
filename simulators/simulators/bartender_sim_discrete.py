@@ -27,7 +27,7 @@ class BartenderSim(Node):
         self.sim_publishers = {}
         self.bar_clients = []
         self.bottles = []
-        self.glasses = []
+        self.glass = []
         self.know_preference = {}
         self.perceptions["robot_position"] = numpy.random.randint(0, 1) # Random initial position of the robot, 0 = preparation table, 1 = serving table
 
@@ -36,6 +36,10 @@ class BartenderSim(Node):
         self.fruits = []
         self.catched_fruit = None
         self.tested_fruit = None
+        # Fixing the serving position to a specific distance and angle
+        self.serving_pos = {"distance":0.8, "angle":0.0}
+        self.last_glass_pos = {}
+        self.last_bottle_pos = {}
 
         self.normal_inner = numpy.poly1d(
         numpy.polyfit([0.0, 0.3925, 0.785, 1.1775, 1.57], [0.45, 0.47, 0.525, 0.65, 0.9], 3)
@@ -44,8 +48,8 @@ class BartenderSim(Node):
         numpy.polyfit([0.0, 0.3925, 0.785, 1.1775, 1.57], [1.15, 1.25, 1.325, 1.375, 1.375], 3)
         )
 
-        self.collection_area = {"x_min":-0.6, "x_max":0.6, "y_min":0.9, "y_max":1.1, "object":"fruits"}
-        self.weighing_area = {"x_min":-0.5, "x_max":0.5, "y_min":0.5, "y_max":0.7, "object":"scales",}
+        self.collection_area = {"x_min":-0.6, "x_max":0.6, "y_min":0.9, "y_max":1.1, "object":"bottles"}
+        self.weighing_area = {"x_min":-0.5, "x_max":0.5, "y_min":0.5, "y_max":0.7, "object":"glass",}
         self.accepted_fruit_pos = {"distance":0.8, "angle":-65*(numpy.pi/180)}
         self.rejected_fruit_pos = {"distance":0.8, "angle":65*(numpy.pi/180)}
         self.fruit_right_side_pos = {"distance":0.8, "angle":5*(numpy.pi/360)}
@@ -124,7 +128,7 @@ class BartenderSim(Node):
         self.get_logger().info("Generating glass...")
         distance, angle = self.random_position(self.collection_area)
         glass = dict(distance=distance, angle=angle)
-        self.glasses.append(glass)
+        self.glass.append(glass)
 
     def generate_fruits(self, n_fruits, scale = None):
         """
@@ -237,20 +241,11 @@ class BartenderSim(Node):
         """
         self.get_logger().info("Perceiving glass...")
         
-        if self.glasses:
-            # Ensure we have enough perception slots for the glass
-            if len(self.perceptions["glass"].data) < 1:
-                self.perceptions["glass"].data.append(self.base_messages["glass"]())
-            
-            # Update the perception data
-            self.perceptions["glass"].data[0].distance = self.glasses[0]["distance"]
-            self.perceptions["glass"].data[0].angle = self.glasses[0]["angle"]
-        else:
-            # If no glass, create default perception data
-            self.perceptions["glass"].data = [self.base_messages["glass"]()]
-
-        
-            
+        if self.glass:
+            glass = self.glass[0]
+            self.perceptions["glass"].data[0].distance = glass["distance"]
+            self.perceptions["glass"].data[0].angle = glass["angle"]
+            self.perceptions["glass"].data[0].state = False
 
     def perceive_closest_fruit(self):
         """
@@ -276,32 +271,24 @@ class BartenderSim(Node):
         Generate random perceptions when the world is reset.
         """
         self.catched_fruit = None
-
-        # Generate scale
-        self.perceptions["scales"].data = []
-        self.perceptions["scales"].data.append(self.base_messages["scales"]())
-        distance, angle = self.random_position(self.weighing_area)
-        self.perceptions["scales"].data[0].distance = distance
-        self.perceptions["scales"].data[0].angle = angle
-        self.perceptions["scales"].data[0].state = 0
-        self.perceptions["scales"].data[0].active = False
-        # Generate fruits
-        self.fruits = []
-        self.bottles = []
-        n_fruits = self.rng.integers(0,4)
-        self.perceptions["fruits"].data = []
-        self.perceptions["fruits"].data.append(self.base_messages["fruits"]())
         self.perceptions["client"].data = numpy.random.randint(0, 3)
         self.perceptions["bottles"].data = []
         self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
-        # Generate fruits, clients and bottles
-        self.generate_fruits(n_fruits, self.perceptions['scales'].data[0])
+
+        # Generate scale
+        self.perceptions["glass"].data = []
+        self.perceptions["glass"].data.append(self.base_messages["glass"]())
+        distance, angle = self.random_position(self.weighing_area)
+        self.perceptions["glass"].data[0].distance = distance
+        self.perceptions["glass"].data[0].angle = angle
+        self.perceptions["glass"].data[0].state = 0
+
+        # Generate, clients and bottles
         self.generate_clients()
         self.generate_bottles()
         self.generate_glass()
 
         # Perceive the environment
-        self.perceive_closest_fruit()
         self.perceive_bottles()
         self.perceive_last_bottle()
         self.perceive_glass()
@@ -309,20 +296,16 @@ class BartenderSim(Node):
 
         self.perceptions["glass_in_left_hand"].data = False
         self.perceptions["bottle_in_right_hand"].data = False
+        
+        # if self.rng.uniform() > 0.5 and self.fruits:
+        #     if self.perceptions["fruits"].data[0].angle > 0.0:
+        #         self.perceptions["fruit_in_right_hand"].data = True
+        #         self.perceptions["fruit_in_left_hand"].data = False
+        #     else:
+        #         self.perceptions["fruit_in_left_hand"].data = True
+        #         self.perceptions["fruit_in_right_hand"].data = False
 
-        self.perceptions["fruit_in_right_hand"].data = False
-        self.perceptions["fruit_in_left_hand"].data = False
-        if self.rng.uniform() > 0.5 and self.fruits:
-            if self.perceptions["fruits"].data[0].angle > 0.0:
-                self.perceptions["fruit_in_right_hand"].data = True
-                self.perceptions["fruit_in_left_hand"].data = False
-            else:
-                self.perceptions["fruit_in_left_hand"].data = True
-                self.perceptions["fruit_in_right_hand"].data = False
-
-            self.catched_fruit = self.closest_fruit
-
-        self.perceptions["button_light"].data = False if self.rng.uniform() > 0.5 else True
+        #     self.catched_fruit = self.closest_fruit
 
         self.update_reward_sensor()
 
@@ -330,8 +313,10 @@ class BartenderSim(Node):
         """
         Pick the glass.
         """
-        if not self.perceptions["glass_in_left_hand"].data and self.glasses:
+        if not self.perceptions["glass_in_left_hand"].data and self.glass:
             self.perceptions["glass_in_left_hand"].data = True if self.perceptions["glass"].data[0].angle <= 0.0 else False
+            self.last_glass_pos['distance'] = self.perceptions["glass"].data[0].distance
+            self.last_glass_pos['angle'] = self.perceptions["glass"].data[0].angle
 
     def pick_bottle_policy(self):
         """Pick the bottle.
@@ -354,18 +339,24 @@ class BartenderSim(Node):
         Place the object on the table.
         """
         if self.perceptions["glass_in_left_hand"].data:
-            self.perceptions["glass"].data[0].state = False
+            if self.perceptions["glass"].data[0].state:
+                self.perceptions["glass"].data[0].distance = self.serving_pos['distance']
+                self.perceptions["glass"].data[0].angle = self.serving_pos['angle']
+                self.perceptions["glass"].data[0].state = False
+            else:
+                self.perceptions["glass"].data[0].distance = self.last_glass_pos['distance']
+                self.perceptions["glass"].data[0].angle = self.last_glass_pos['angle']
         if self.perceptions["bottle_in_right_hand"].data:
-            self.perceptions["bottles"].data[0].state = False
+            self.perceptions["bottle_in_right_hand"].data = False
 
     def move_to_policy(self):
         """
         Move the robot to the desired position.
         """
-        if self.perceptions["robot_position"].data == 0:
-            self.perceptions["robot_position"].data = 1
-        elif self.perceptions["robot_position"].data == 1:
-            self.perceptions["robot_position"].data = 0
+        if self.perceptions["robot_position"].data:
+            self.perceptions["robot_position"].data = False
+        else:
+            self.perceptions["robot_position"].data = True
 
     def pick_fruit_policy(self):
         """
@@ -494,67 +485,26 @@ class BartenderSim(Node):
                 self.perceptions["fruit_in_right_hand"].data = False
                 self.catched_fruit = None
 
-    
-    def press_button_policy(self):
-        """
-        Toggle the light of the button.
-        """
-        if self.perceptions["button_light"].data:
-            self.perceptions["button_light"].data = False
-        else:
-            self.perceptions["button_light"].data = True
 
-    def fruit_in_placed_pos(self):
+    def glass_is_in_serving_position(self):
         """
-        Check if the fruit is in the center of the table.
-
-        :return: True if the fruit is in the center of the table, False otherwise.
-        :rtype: bool
+        Check if the glass is in the serving position.
         """
-        fruit = self.perceptions['fruits'].data[0]
+        glass = self.perceptions['glass'].data[0]
+        # Fixing the serving position to a specific distance and angle
+        serving_pos = self.serving_pos
+        return (glass.distance == serving_pos['distance']) and (abs(glass.angle) == abs(serving_pos['angle']))
 
-        placed = (fruit.distance == self.fruit_left_side_pos['distance']) and (
-            abs(fruit.angle) == abs(self.fruit_left_side_pos['angle'])) and (
-            not self.catched_fruit)
+    def glass_is_in_the_original_position(self):
+        """
+        Check if the glass is in the original position.
+        """
+        glass = self.perceptions['glass'].data[0]
+        # Fixing the original position to a specific distance and angle
+        original_pos = self.last_bottle_pos
+        return (glass.distance == original_pos['distance']) and (abs(glass.angle) == abs(original_pos['angle']))
+
         
-        return placed
-        
-
-    def reward_progress_classify_fruit_goal(self):
-        """
-        Gives a larger reward the closer the robot is to correctly classifying a fruit.
-        If the fruit is correctly accepted or discarded, the reward is 1.0.
-        """
-        scale = self.perceptions["scales"].data[0]
-        fruit = self.perceptions["fruits"].data[0]
-        progress = 0.0
-        if self.iteration > self.change_reward_iterations['stage2']:
-            self.get_logger().info("STAGE 2 REWARD: PROGRESS CLASSIFY FRUIT")
-            if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
-                progress = 1.0
-            
-            elif scale.active==True:
-                progress = 0.75
-            
-            elif self.catched_fruit:
-                if (fruit.angle * scale.angle) > 0:
-                    progress = 0.5
-                else:
-                    progress = 0.250
-            
-            elif not self.catched_fruit:
-                if abs(fruit.angle) == abs(self.fruit_left_side_pos["angle"]) and (
-                    fruit.distance == self.fruit_left_side_pos["distance"]) and (
-                        fruit.angle * scale.angle > 0
-                    ):
-                    progress = 0.375
-            
-                elif self.fruits:
-                    progress = 0.125
-
-            self.perceptions["progress_classify_fruit_goal"].data = progress
-
-
     def reward_serve_glass_goal(self):
         """
         Gives a reward of 1.0 if the glass is placed in the serving table .
@@ -562,7 +512,7 @@ class BartenderSim(Node):
         reward = 0.0 
         if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
             self.get_logger().info("STAGE 1 REWARD: PLACE GLASS")
-            if self.glass_in_placed_pos():
+            if self.glass_is_in_serving_position():
                 reward = 1.0
                 
         else:
@@ -571,8 +521,20 @@ class BartenderSim(Node):
                 self.get_logger().info("STAGE 2 REWARD: NONE")
             else:
                 self.get_logger().info("STAGE 0 REWARD: NONE")
-            
-        self.perceptions["place_fruit_goal"].data = reward
+
+        self.perceptions["serve_the_drink_goal"].data = reward
+
+
+    def reward_left_the_glass_goal(self):
+        """
+        Gives a reward of 1.0 if the glass is correctly placed on the left side.
+        """
+        reward = 0.0
+        if self.iteration > self.change_reward_iterations['stage2']:
+            self.get_logger().info("STAGE 2 REWARD: LEFT GLASS")
+            if self.glass_is_in_the_original_position():
+                reward = 1.0
+        self.perceptions["left_the_glass_goal"].data = reward
 
     def reward_classify_fruit_goal(self):
         """
@@ -598,11 +560,11 @@ class BartenderSim(Node):
         self.fruit_correctly_rejected = False
         self.random_perceptions()
         self.publish_perceptions()
-        if (not self.catched_fruit) and (
-            self.perceptions["fruit_in_left_hand"].data
-            or self.perceptions["fruit_in_right_hand"].data
-        ):
-            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+        # if (not self.catched_fruit) and (
+        #     self.perceptions["fruit_in_left_hand"].data
+        #     or self.perceptions["fruit_in_right_hand"].data
+        # ):
+        #     self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
 
     def update_reward_sensor(self):
         """
@@ -665,24 +627,28 @@ class BartenderSim(Node):
         """
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
-        self.perceive_closest_fruit()
+        # self.perceive_closest_fruit()
+        self.perceive_bottles()
+        self.perceive_glass()
         self.get_logger().info(f"FRUITS BEFORE POLICY: {self.fruits}")
         self.get_logger().info(f"CATCHED FRUIT BEFORE: {self.catched_fruit}")
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
         self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
         getattr(self, request.policy + "_policy")()
-        self.perceive_closest_fruit()
+        # self.perceive_closest_fruit()
+        self.perceive_bottles()
+        self.perceive_glass()
         self.get_logger().info(f"FRUITS AFTER POLICY: {self.fruits}")
         self.get_logger().info(f"CATCHED FRUIT AFTER: {self.catched_fruit}")
         self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
         self.update_reward_sensor()
         self.publish_perceptions()
-        if (not self.catched_fruit) and (
-            self.perceptions["fruit_in_left_hand"].data
-            or self.perceptions["fruit_in_right_hand"].data
-        ):
-            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
-            rclpy.shutdown()
+        # if (not self.catched_fruit) and (
+        #     self.perceptions["fruit_in_left_hand"].data
+        #     or self.perceptions["fruit_in_right_hand"].data
+        # ):
+        #     self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+        #     rclpy.shutdown()
         response.success = True
         return response
 

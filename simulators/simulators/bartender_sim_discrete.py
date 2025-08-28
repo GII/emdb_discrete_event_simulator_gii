@@ -29,7 +29,6 @@ class BartenderSim(Node):
         self.bottles = []
         self.glass = []
         self.know_preference = {}
-        self.perceptions["robot_position"] = numpy.random.randint(0, 1) # Random initial position of the robot, 0 = preparation table, 1 = serving table
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
@@ -191,31 +190,29 @@ class BartenderSim(Node):
 
     def perceive_bottles(self):
         """
-        Choose the bottles, update the bottle perceptions accordingly.
+        Perceive only the closest bottle and update the bottle perceptions accordingly.
         """
-        self.get_logger().info("Perceiving bottles...")
-        
-        # Ensure we have enough perception slots for all bottles
+        self.get_logger().info("Perceiving the closest bottle...")
+
         if self.bottles:
-            # Make sure we have enough perception data slots
-            needed_slots = len(self.bottles)
-            current_slots = len(self.perceptions["bottles"].data)
-            
-            # Add more slots if needed
-            while current_slots < needed_slots:
+            # Find the closest bottle based on distance
+            closest_bottle = min(self.bottles, key=lambda bottle: bottle["distance"])
+
+            # Ensure there is at least one perception slot
+            if not self.perceptions["bottles"].data:
                 self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
-                current_slots += 1
-            
-            # Update the perception data
-            for i, bottle in enumerate(self.bottles):
-                self.perceptions["bottles"].data[i].distance = bottle["distance"]
-                self.perceptions["bottles"].data[i].angle = bottle["angle"]
-                # Set the ID if the perception message has an id field
-                if hasattr(self.perceptions["bottles"].data[i], 'id'):
-                    self.perceptions["bottles"].data[i].id = bottle["id"]
+
+            # Update the perception data with the closest bottle
+            self.perceptions["bottles"].data[0].distance = closest_bottle["distance"]
+            self.perceptions["bottles"].data[0].angle = closest_bottle["angle"]
+            if hasattr(self.perceptions["bottles"].data[0], 'id'):
+                self.perceptions["bottles"].data[0].id = closest_bottle["id"]
+
+            # Clear any additional perception slots
+            self.perceptions["bottles"].data = self.perceptions["bottles"].data[:1]
         else:
             # If no bottles, create default perception data
-            self.perceptions["bottles"].data = [self.base_messages["bottles"]() for _ in range(3)]
+            self.perceptions["bottles"].data = [self.base_messages["bottles"]()]
 
     def perceive_last_bottle(self):
         """
@@ -275,13 +272,15 @@ class BartenderSim(Node):
         self.perceptions["bottles"].data = []
         self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
 
-        # Generate scale
+        # Generate glass
         self.perceptions["glass"].data = []
         self.perceptions["glass"].data.append(self.base_messages["glass"]())
         distance, angle = self.random_position(self.weighing_area)
         self.perceptions["glass"].data[0].distance = distance
         self.perceptions["glass"].data[0].angle = angle
         self.perceptions["glass"].data[0].state = 0
+
+        self.perceptions["robot_position"].data = 0 # Random initial position of the robot, 0 = preparation table, 1 = serving table
 
         # Generate, clients and bottles
         self.generate_clients()
@@ -319,11 +318,42 @@ class BartenderSim(Node):
             self.last_glass_pos['angle'] = self.perceptions["glass"].data[0].angle
 
     def pick_bottle_policy(self):
-        """Pick the bottle.
-        TODO: Implement the WorldModel reading"""
+        """Pick the bottle."""
+        self.get_logger().info("Executing pick_bottle_policy...")
+        self.get_logger().info(f"Current perceptions: {self.perceptions}")
+
+        # Don't pick a bottle if already holding one
+        if self.perceptions["bottle_in_right_hand"].data:
+            self.get_logger().info("Bottle already in hand. Exiting policy.")
+            return
+
         if self.know_preference.get(self.perceptions["client"].data, None) is not None:
-            self.perceptions["bottle_in_right_hand"].data = True if self.know_preference[self.perceptions["client"].data] == self.perceptions["bottles"].data[0].id else False
-            self.perceptions["last_bottle"].data = int(self.bar_clients[self.perceptions["client"].data]["beverage"])
+            client_preference = self.know_preference[self.perceptions["client"].data]
+            self.get_logger().info(f"Client preference: {client_preference}")
+
+            bottle_found = False
+            for bottle in self.perceptions["bottles"].data:
+                if hasattr(bottle, 'id') and int(bottle.id) == int(client_preference):
+                    self.perceptions["bottle_in_right_hand"].data = True
+                    self.perceptions["last_bottle"].data = int(client_preference)
+                    bottle_found = True
+                    self.get_logger().info(f"Picked bottle with ID: {client_preference}")
+                    break
+            
+            if not bottle_found:
+                self.perceptions["bottle_in_right_hand"].data = False
+                self.get_logger().info("No matching bottle found.")
+        else:
+            if self.perceptions["bottles"].data:
+                bottle = self.perceptions["bottles"].data[0]
+                self.perceptions["bottle_in_right_hand"].data = True
+                if hasattr(bottle, 'id'):
+                    self.perceptions["last_bottle"].data = int(bottle.id)
+                else:
+                    self.perceptions["last_bottle"].data = 0
+                self.get_logger().info(f"Picked first available bottle with ID: {self.perceptions['last_bottle'].data}")
+
+        self.get_logger().info(f"Updated perceptions: {self.perceptions}")
 
     def prepare_drink_policy(self):
         """
@@ -354,9 +384,9 @@ class BartenderSim(Node):
         Move the robot to the desired position.
         """
         if self.perceptions["robot_position"].data:
-            self.perceptions["robot_position"].data = False
+            self.perceptions["robot_position"].data = 0
         else:
-            self.perceptions["robot_position"].data = True
+            self.perceptions["robot_position"].data = 1
 
     def pick_fruit_policy(self):
         """

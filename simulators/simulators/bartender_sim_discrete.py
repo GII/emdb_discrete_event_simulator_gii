@@ -129,65 +129,6 @@ class BartenderSim(Node):
         glass = dict(distance=distance, angle=angle)
         self.glass.append(glass)
 
-    def generate_fruits(self, n_fruits, scale = None):
-        """
-        Generate a number of fruits with random positions and dimensions.
-
-        :param n_fruits: Number of fruits to generate.
-        :type n_fruits: int
-        :param scale: If it is None, fruit will only be generated in the collection area. Otherwise, 
-            fruits could be generated anywhere.
-        :type scale: simulators_interfaces.msg.ScaleListMsg or NoneType
-        """
-        self.get_logger().info("Generating fruits...")
-        for _ in range(n_fruits):
-            distance, angle = self.random_position(self.collection_area)
-            dim_max = self.rng.uniform(low=0.03, high=0.1)
-            fruit = dict(distance = distance, angle = angle, dim_max = dim_max)
-            self.fruits.append(fruit)
-
-        if self.rng.uniform() > 0.5 and scale:
-            if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
-                positions = ['accepted_pos', 'rejected_pos', 'scale_pos']
-            else:
-                positions = ['placed_pos_l', 'placed_pos_r', 'accepted_pos', 'rejected_pos', 'scale_pos']
-            
-            dim_max = self.rng.uniform(low=0.03, high=0.1)
-            choice = self.rng.choice(positions)
-
-            if choice == 'placed_pos_l':
-                fruit = dict(
-                    distance = self.fruit_left_side_pos['distance'],
-                    angle = self.fruit_left_side_pos['angle'],
-                    dim_max = dim_max    
-                )
-            elif choice == 'placed_pos_r':
-                fruit = dict(
-                    distance = self.fruit_right_side_pos['distance'],
-                    angle = self.fruit_right_side_pos['angle'],
-                    dim_max = dim_max    
-                )
-            elif choice == 'accepted_pos':
-                fruit = dict(
-                    distance = self.accepted_fruit_pos['distance'],
-                    angle = self.accepted_fruit_pos['angle'],
-                    dim_max = dim_max    
-                )
-            elif choice == 'rejected_pos':
-                fruit = dict(
-                    distance = self.rejected_fruit_pos['distance'],
-                    angle = self.rejected_fruit_pos['angle'],
-                    dim_max = dim_max    
-                )
-            elif choice == 'scale_pos':
-                fruit = dict(
-                    distance = scale.distance,
-                    angle = scale.angle,
-                    dim_max = dim_max    
-                )
-            
-            self.fruits.append(fruit)
-
     def perceive_bottles(self):
         """
         Perceive only the closest bottle and update the bottle perceptions accordingly.

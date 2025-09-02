@@ -2,12 +2,14 @@ import os
 import numpy
 import yaml
 import yamlloader
+from core.service_client import ServiceClient
+from core.cognitive_node import CognitiveNode
 import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from core.service_client import ServiceClient
-from core_interfaces.srv import LoadConfig
+from core_interfaces.srv import LoadConfig, CreateNode
 from core.utils import class_from_classname
 
 class BartenderSim(Node):

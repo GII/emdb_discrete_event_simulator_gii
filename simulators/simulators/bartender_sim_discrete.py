@@ -100,7 +100,7 @@ class BartenderSim(Node):
         Generate clients with random bottles preferences.
         """
         self.get_logger().info("Generating clients...")
-        ids = numpy.random.choice(3, size=3, replace=False)
+        ids = numpy.random.choice(range(1, 4), size=3, replace=False)
         ident = 0
         for id in ids:
             client = dict(
@@ -187,31 +187,16 @@ class BartenderSim(Node):
             self.perceptions["glass"].data[0].angle = glass["angle"]
             self.perceptions["glass"].data[0].state = False
 
-    def perceive_closest_fruit(self):
-        """
-        Choose the closest fruit from the list of fruits and update the fruit perceptions accordingly.
-        Remember that, in this case, the robot is only able to perceive the fruit that is closest to it.
-        """
-        self.get_logger().info("Perceiving closest fruits...")
-        if self.fruits:
-            distances = numpy.array([fruit["distance"] for fruit in self.fruits])
-            closest_fruit_index = numpy.argmin(distances)
-            self.closest_fruit = self.fruits[closest_fruit_index]
-            self.perceptions["fruits"].data[0].distance = self.closest_fruit["distance"]
-            self.perceptions["fruits"].data[0].angle = self.closest_fruit["angle"]
-            self.perceptions["fruits"].data[0].dim_max = self.closest_fruit["dim_max"]
-        else:
-            self.perceptions["fruits"].data[0].distance = 1.9
-            self.perceptions["fruits"].data[0].angle = 1.4
-            self.perceptions["fruits"].data[0].dim_max = 0.1
-            self.closest_fruit = None
 
     def random_perceptions(self):
         """
         Generate random perceptions when the world is reset.
         """
         self.catched_fruit = None
-        self.perceptions["client"].data = numpy.random.randint(0, 3)
+        self.perceptions["client"].data = []
+        self.perceptions["client"].data.append(self.base_messages["client"]())
+        self.perceptions["client"].data[0].id = int(self.rng.integers(0, 3))  # Random client ID
+        self.perceptions["client"].data[0].preference = 0
         self.perceptions["bottles"].data = []
         self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
 
@@ -270,8 +255,8 @@ class BartenderSim(Node):
             self.get_logger().info("Bottle already in hand. Exiting policy.")
             return
 
-        if self.know_preference.get(self.perceptions["client"].data, None) is not None:
-            client_preference = self.know_preference[self.perceptions["client"].data]
+        if self.know_preference.get(self.perceptions["client"].data[0].id, None) is not None:
+            client_preference = self.know_preference[self.perceptions["client"].data[0].id]
             self.get_logger().info(f"Client preference: {client_preference}")
 
             bottle_found = False
@@ -331,133 +316,43 @@ class BartenderSim(Node):
         else:
             self.perceptions["robot_position"].data = 1
 
-    def pick_fruit_policy(self):
-        """
-        Pick the closest fruit to the robot.
 
-        :raises RuntimeError: If the closest fruit is not the fruit on the scale when the scale is active.
-        """
-        scale = self.perceptions["scales"].data[0]
-        if not self.catched_fruit and self.fruits:
-            if self.closest_fruit["angle"] > 0.0:
-                self.perceptions["fruit_in_right_hand"].data = True
-            else:
-                self.perceptions["fruit_in_left_hand"].data = True
-            if scale.active:
-                scale.active = False
-                #scale.state = 0
-                if self.closest_fruit == self.tested_fruit:
-                    self.tested_fruit = None
-                else:
-                    raise RuntimeError("The tested fruit should be the closest fruit!!")
-            self.fruit_correctly_rejected = False
-            self.fruit_correctly_accepted = False
-            self.catched_fruit = self.closest_fruit
-    
-    def change_hands_policy(self):
-        """
-        Change the fruit from one gripper to the other if the fruit is small enough.
-        """
-        if self.catched_fruit:
-            if self.catched_fruit["dim_max"] <= self.gripper_max:
-                if self.perceptions["fruit_in_left_hand"].data:
-                    self.perceptions["fruit_in_left_hand"].data = False
-                    self.perceptions["fruit_in_right_hand"].data = True
-                    self.catched_fruit["angle"] = -self.catched_fruit["angle"]
-                elif self.perceptions["fruit_in_right_hand"].data:
-                    self.perceptions["fruit_in_left_hand"].data = True
-                    self.perceptions["fruit_in_right_hand"].data = False
-                    self.catched_fruit["angle"] = -self.catched_fruit["angle"]
-    
-    def place_fruit_policy(self):
-        """
-        Place the fruit in the center of the table.
-        If the fruit is in the left hand, it will be placed slightly on the right 
-        side of the table, and vice versa.
-        It is a way to change the side of the table where the fruit is placed.
-        """
-        if self.catched_fruit:
-            if self.perceptions["fruit_in_left_hand"].data:
-                self.catched_fruit["distance"] = self.fruit_right_side_pos["distance"]
-                self.catched_fruit["angle"] = self.fruit_right_side_pos["angle"]
-                self.perceptions["fruit_in_left_hand"].data = False
-                self.catched_fruit = None
-
-            elif self.perceptions["fruit_in_right_hand"].data:
-                self.catched_fruit["distance"] = self.fruit_left_side_pos["distance"]
-                self.catched_fruit["angle"] = self.fruit_left_side_pos["angle"]
-                self.perceptions["fruit_in_right_hand"].data = False
-                self.catched_fruit = None
-
-    def test_fruit_policy(self):
-        """
-        Put the fruit on the scale in order to test it.
-        """
-        if self.catched_fruit:
-            scale = self.perceptions["scales"].data[0]
-            if (self.perceptions["fruit_in_left_hand"].data and scale.angle <= 0.0) or (
-                self.perceptions["fruit_in_right_hand"].data and scale.angle > 0.0):
-                self.catched_fruit["distance"] = scale.distance
-                self.catched_fruit["angle"] = scale.angle
-                if self.iteration > self.change_reward_iterations['stage1']:
-                    scale.active = True
-                    if scale.state == 0:
-                        scale.state = 1 if self.rng.uniform() > 0.5 else 2
-                self.perceptions["fruit_in_left_hand"].data = False
-                self.perceptions["fruit_in_right_hand"].data = False
-                self.tested_fruit = self.catched_fruit
-                self.catched_fruit = None
 
     def ask_nicely_policy(self):
         """
-        Ask the the client the preferred beverage.
+        Ask the client the preferred beverage.
+        Waits for 2 iterations before setting the preference.
         """
-        if not self.know_preference.get(self.perceptions["client"].data, None):
-            self.know_preference[self.perceptions["client"].data] = self.bar_clients[self.perceptions["client"].data]["beverage"]
+        client_id = self.perceptions["client"].data[0].id
+        
+        if not self.know_preference.get(client_id, None):
+            # Initialize the iteration count for this client if it doesn't exist
+            if not hasattr(self, 'asking_iterations'):
+                self.asking_iterations = {}
+            
+            if client_id not in self.asking_iterations:
+                # First time asking this client
+                self.know_preference[client_id] = self.bar_clients[client_id]["beverage"]
+                # preference es int8, usar int()
+                self.perceptions["client"].data[0].preference = int(self.know_preference[client_id])
+                self.get_logger().info(f"Client {client_id} preference set to {self.know_preference[client_id]}")
+                self.asking_iterations[client_id] = self.iteration
+                self.get_logger().info(f"Started asking client {client_id} at iteration {self.iteration}")
+            else:
+                # Check if 2 iterations have passed
+                iterations_passed = self.iteration - self.asking_iterations[client_id]
+                
+                if iterations_passed >= 2:
+                    # 2 iterations have passed
+                    self.know_preference[client_id] = self.bar_clients[client_id]["beverage"]
+                    # preference es int8, usar int()
+                    self.perceptions["client"].data[0].preference = int(self.know_preference[client_id])
+                    self.get_logger().info(f"Client {client_id} preference set to {self.know_preference[client_id]} after {iterations_passed} iterations")
 
-
-    def accept_fruit_policy(self):
-        """
-        Put the fruit into the accepted fruit box if the fruit is valid.
-        """
-        scale = self.perceptions["scales"].data[0]
-        if scale.active:
-            self.tested_fruit["distance"] = self.accepted_fruit_pos["distance"]
-            self.tested_fruit["angle"] = self.accepted_fruit_pos["angle"]
-            if scale.state == 1:
-                self.fruit_correctly_accepted = True
-                scale.state = 0
-            scale.active = False
-            self.tested_fruit = None
-
-        elif self.catched_fruit:
-            if self.perceptions["fruit_in_left_hand"].data:
-                self.catched_fruit["distance"] = self.accepted_fruit_pos["distance"]
-                self.catched_fruit["angle"] = self.accepted_fruit_pos["angle"]
-                self.perceptions["fruit_in_left_hand"].data = False
-                self.catched_fruit = None
-
-    
-    def discard_fruit_policy(self):
-        """
-        Put the fruit into the discarded fruit box if the fruit is not valid.
-        """
-        scale = self.perceptions["scales"].data[0]
-        if scale.active:
-            self.tested_fruit["distance"] = self.rejected_fruit_pos["distance"]
-            self.tested_fruit["angle"] = self.rejected_fruit_pos["angle"]
-            if scale.state == 2:
-                self.fruit_correctly_rejected = True
-                scale.state = 0
-            scale.active = False
-            self.tested_fruit = None
-        elif self.catched_fruit:
-            if self.perceptions["fruit_in_right_hand"].data:
-                self.catched_fruit["distance"] = self.rejected_fruit_pos["distance"]
-                self.catched_fruit["angle"] = self.rejected_fruit_pos["angle"]
-                self.perceptions["fruit_in_right_hand"].data = False
-                self.catched_fruit = None
-
+                    # Clear the iteration log for this client
+                    del self.asking_iterations[client_id]
+                else:
+                    self.get_logger().info(f"Still asking client {client_id}... iteration {iterations_passed + 1}/2")
 
     def glass_is_in_serving_position(self):
         """
@@ -509,16 +404,6 @@ class BartenderSim(Node):
                 reward = 1.0
         self.perceptions["left_the_glass_goal"].data = reward
 
-    def reward_classify_fruit_goal(self):
-        """
-        Gives a reward of 1.0 if the fruit is correctly classified.
-        """
-        reward = 0.0
-        if self.iteration > self.change_reward_iterations['stage2']:
-            self.get_logger().info("STAGE 2 REWARD: CLASSIFY FRUIT")
-            if self.fruit_correctly_accepted or self.fruit_correctly_rejected:
-                reward = 1.0
-        self.perceptions["classify_fruit_goal"].data = reward
 
     def reset_world(self, data):
         """

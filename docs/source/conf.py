@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath("../../simulators"))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "e-MDB discrete event simulator for GII's experiments"
-copyright = "2024, GII"
+copyright = "2025, GII"
 author = "GII"
 release = "Apache-2.0"
 
@@ -36,6 +36,11 @@ autodoc_mock_imports = [
     "core",
     "core_interfaces",
     "simulators_interfaces",
+    "numpy",        
+    "yaml",        
+    "yamlloader",   
+    "matplotlib",   
+    "scipy",        
 ]
 
 # -- Options for HTML output -------------------------------------------------

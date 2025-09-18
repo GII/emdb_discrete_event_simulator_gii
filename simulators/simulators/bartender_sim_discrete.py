@@ -101,7 +101,7 @@ class BartenderSim(Node):
         """
         self.get_logger().info("Generating clients...")
         ids = numpy.random.choice(range(1, 4), size=3, replace=False)
-        ident = 0
+        ident = 1
         for id in ids:
             client = dict(
                 id = ident,
@@ -116,6 +116,7 @@ class BartenderSim(Node):
         :param n_bottles: Number of bottles to generate.
         :type n_bottles: int
         """
+        self.bottles = []
         self.get_logger().info("Generating bottles...")
         for i in range(n_bottles):
             distance, angle = self.random_position(self.collection_area)
@@ -133,29 +134,32 @@ class BartenderSim(Node):
 
     def perceive_bottles(self):
         """
-        Perceive only the closest bottle and update the bottle perceptions accordingly.
+        Perceive all bottles and update the bottle perceptions accordingly.
         """
-        self.get_logger().info("Perceiving the closest bottle...")
+        self.get_logger().info("Perceiving all bottles...")
+
+        self.perceptions["bottles"].data = []
 
         if self.bottles:
-            # Find the closest bottle based on distance
-            closest_bottle = min(self.bottles, key=lambda bottle: bottle["distance"])
-
-            # Ensure there is at least one perception slot
-            if not self.perceptions["bottles"].data:
-                self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
-
-            # Update the perception data with the closest bottle
-            self.perceptions["bottles"].data[0].distance = closest_bottle["distance"]
-            self.perceptions["bottles"].data[0].angle = closest_bottle["angle"]
-            if hasattr(self.perceptions["bottles"].data[0], 'id'):
-                self.perceptions["bottles"].data[0].id = closest_bottle["id"]
-
-            # Clear any additional perception slots
-            self.perceptions["bottles"].data = self.perceptions["bottles"].data[:1]
+            # Add all bottles to perception
+            for bottle in self.bottles:
+                # Create a new bottle perception message
+                bottle_msg = self.base_messages["bottles"]()
+                
+                # Update the perception data with current bottle
+                bottle_msg.distance = bottle["distance"]
+                bottle_msg.angle = bottle["angle"]
+                if hasattr(bottle_msg, 'id'):
+                    bottle_msg.id = bottle["id"]
+                
+                # Add bottle to perception list
+                self.perceptions["bottles"].data.append(bottle_msg)
+                
+            self.get_logger().info(f"Perceived {len(self.bottles)} bottles")
         else:
             # If no bottles, create default perception data
             self.perceptions["bottles"].data = [self.base_messages["bottles"]()]
+            self.get_logger().info("No bottles available, created default perception")
 
     def perceive_last_bottle(self):
         """
@@ -165,7 +169,7 @@ class BartenderSim(Node):
         
         # Add client WorldModel processing logic here
 
-        # Use existing last_bottle perception or generate random if not available
+        # Use existing last_bottle perception or generate random if not available 
         if ("last_bottle" in self.perceptions and self.perceptions["last_bottle"].data is not None) and (self.perceptions["last_bottle"].data != False):
             bottle_id = self.perceptions["last_bottle"].data
         else:
@@ -195,7 +199,7 @@ class BartenderSim(Node):
         self.catched_fruit = None
         self.perceptions["client"].data = []
         self.perceptions["client"].data.append(self.base_messages["client"]())
-        self.perceptions["client"].data[0].id = int(self.rng.integers(0, 3))  # Random client ID
+        self.perceptions["client"].data[0].id = int(self.rng.integers(0, 4))  # Random client ID
         self.perceptions["client"].data[0].preference = 0
         self.perceptions["bottles"].data = []
         self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
@@ -208,7 +212,7 @@ class BartenderSim(Node):
         self.perceptions["glass"].data[0].angle = angle
         self.perceptions["glass"].data[0].state = 0
 
-        self.perceptions["robot_position"].data = 0 # Random initial position of the robot, 0 = preparation table, 1 = serving table
+        self.perceptions["robot_position"].data = 0.0 # Random initial position of the robot, 0 = preparation table, 1 = serving table
 
         # Generate, clients and bottles
         self.generate_clients()
@@ -223,16 +227,6 @@ class BartenderSim(Node):
 
         self.perceptions["glass_in_left_hand"].data = False
         self.perceptions["bottle_in_right_hand"].data = False
-        
-        # if self.rng.uniform() > 0.5 and self.fruits:
-        #     if self.perceptions["fruits"].data[0].angle > 0.0:
-        #         self.perceptions["fruit_in_right_hand"].data = True
-        #         self.perceptions["fruit_in_left_hand"].data = False
-        #     else:
-        #         self.perceptions["fruit_in_left_hand"].data = True
-        #         self.perceptions["fruit_in_right_hand"].data = False
-
-        #     self.catched_fruit = self.closest_fruit
 
         self.update_reward_sensor()
 
@@ -289,7 +283,7 @@ class BartenderSim(Node):
         """
         # check if is bottle and glass in the hands
         if self.perceptions["glass_in_left_hand"].data and self.perceptions["bottle_in_right_hand"].data:
-            if self.know_preference.get(self.perceptions["client"].data, None) is not None:
+            if self.know_preference.get(self.perceptions["client"].data[0].id, None) is not None:
                 self.perceptions["glass"].data[0].state = True
 
     def place_object_policy(self):
@@ -312,47 +306,64 @@ class BartenderSim(Node):
         Move the robot to the desired position.
         """
         if self.perceptions["robot_position"].data:
-            self.perceptions["robot_position"].data = 0
+            self.perceptions["robot_position"].data = 0.0
         else:
-            self.perceptions["robot_position"].data = 1
+            self.perceptions["robot_position"].data = 0.95
 
 
 
     def ask_nicely_policy(self):
         """
         Ask the client the preferred beverage.
-        Waits for 2 iterations before setting the preference.
+        Always sets the preference when executed, maintains it for 2 iterations, then resets to 0.
         """
         client_id = self.perceptions["client"].data[0].id
         
-        if not self.know_preference.get(client_id, None):
-            # Initialize the iteration count for this client if it doesn't exist
-            if not hasattr(self, 'asking_iterations'):
-                self.asking_iterations = {}
+        # Skip if no valid client (ID 0 means no client)
+        if client_id == 0:
+            self.get_logger().info("No client present (ID 0), nothing to ask")
+            return
+        
+        # Initialize the iteration count for this client if it doesn't exist
+        if not hasattr(self, 'asking_iterations'):
+            self.asking_iterations = {}
+        
+        # Always find and set the client preference when this policy is executed
+        client_data = None
+        for client in self.bar_clients:
+            self.get_logger().info(f'Checking client: {client}')
+            if client["id"] == client_id:
+                client_data = client
+                break
+        
+        if client_data is None:
+            self.get_logger().error(f"Client with ID {client_id} not found in bar_clients")
+            return
+        
+        # Check if this is the first time asking this client
+        if client_id not in self.asking_iterations:
+            # First time - set preference and start counting
+            self.know_preference[client_id] = client_data["beverage"]
+            self.perceptions["client"].data[0].preference = int(self.know_preference[client_id])
+            self.asking_iterations[client_id] = self.iteration
+            self.get_logger().info(f"Client {client_id} preference set to {self.know_preference[client_id]} (first time asking)")
+        else:
+            # Check how many iterations have passed since first asking
+            iterations_passed = self.iteration - self.asking_iterations[client_id]
             
-            if client_id not in self.asking_iterations:
-                # First time asking this client
-                self.know_preference[client_id] = self.bar_clients[client_id]["beverage"]
-                # preference es int8, usar int()
+            if iterations_passed < 2:
+                # Still within the 2 iteration window - maintain preference
+                self.know_preference[client_id] = client_data["beverage"]
                 self.perceptions["client"].data[0].preference = int(self.know_preference[client_id])
-                self.get_logger().info(f"Client {client_id} preference set to {self.know_preference[client_id]}")
-                self.asking_iterations[client_id] = self.iteration
-                self.get_logger().info(f"Started asking client {client_id} at iteration {self.iteration}")
+                self.get_logger().info(f"Client {client_id} preference maintained at {self.know_preference[client_id]} (iteration {iterations_passed + 1}/2)")
             else:
-                # Check if 2 iterations have passed
-                iterations_passed = self.iteration - self.asking_iterations[client_id]
+                # 2 iterations have passed - reset preference to 0
+                self.know_preference[client_id] = 0
+                self.perceptions["client"].data[0].preference = 0
+                self.get_logger().info(f"Client {client_id} preference reset to 0 after {iterations_passed} iterations (client forgot)")
                 
-                if iterations_passed >= 2:
-                    # 2 iterations have passed
-                    self.know_preference[client_id] = self.bar_clients[client_id]["beverage"]
-                    # preference es int8, usar int()
-                    self.perceptions["client"].data[0].preference = int(self.know_preference[client_id])
-                    self.get_logger().info(f"Client {client_id} preference set to {self.know_preference[client_id]} after {iterations_passed} iterations")
-
-                    # Clear the iteration log for this client
-                    del self.asking_iterations[client_id]
-                else:
-                    self.get_logger().info(f"Still asking client {client_id}... iteration {iterations_passed + 1}/2")
+                # Clear the iteration log for this client so it can be asked again
+                del self.asking_iterations[client_id]
 
     def glass_is_in_serving_position(self):
         """
@@ -418,11 +429,6 @@ class BartenderSim(Node):
         self.fruit_correctly_rejected = False
         self.random_perceptions()
         self.publish_perceptions()
-        # if (not self.catched_fruit) and (
-        #     self.perceptions["fruit_in_left_hand"].data
-        #     or self.perceptions["fruit_in_right_hand"].data
-        # ):
-        #     self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
 
     def update_reward_sensor(self):
         """
@@ -485,28 +491,16 @@ class BartenderSim(Node):
         """
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
-        # self.perceive_closest_fruit()
         self.perceive_bottles()
         self.perceive_glass()
-        self.get_logger().info(f"FRUITS BEFORE POLICY: {self.fruits}")
-        self.get_logger().info(f"CATCHED FRUIT BEFORE: {self.catched_fruit}")
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
         self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
         getattr(self, request.policy + "_policy")()
-        # self.perceive_closest_fruit()
         self.perceive_bottles()
         self.perceive_glass()
-        self.get_logger().info(f"FRUITS AFTER POLICY: {self.fruits}")
-        self.get_logger().info(f"CATCHED FRUIT AFTER: {self.catched_fruit}")
         self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
         self.update_reward_sensor()
         self.publish_perceptions()
-        # if (not self.catched_fruit) and (
-        #     self.perceptions["fruit_in_left_hand"].data
-        #     or self.perceptions["fruit_in_right_hand"].data
-        # ):
-        #     self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
-        #     rclpy.shutdown()
         response.success = True
         return response
 

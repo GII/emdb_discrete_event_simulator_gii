@@ -8,8 +8,8 @@ The following simulators have been implemented:
 
 - **Put object in box:** Simulates a scenario where a robot has to grasp a cylinder and place it into a box. 
 - **Fruit shop:** Simulates a fruit classifying task where the robot has to grasp a fruit, weigh it and then classify it as accepted or rejected.  
-- **Pump panel:** Simulates an operation panel where a pumping plant has to be started after some initial configurations. The policies consist in pressing buttons and grasping objects.
-- **2D Manipulation:** A simple 2D environment where two manipulators have to move a cylinder to a box. 
+- **Pump panel: (Work in progress)** Simulates an operation panel where a pumping plant has to be started after some initial configurations. The policies consist in pressing buttons and grasping objects.
+- **2D Manipulation: (Work in progress)** A simple 2D environment where two manipulators have to move a cylinder to a box. 
 
 There are two ROS 2 packages in this repository:
 

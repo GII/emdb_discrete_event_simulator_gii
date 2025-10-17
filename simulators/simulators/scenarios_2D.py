@@ -431,11 +431,8 @@ class Sim(object):
             self.ball_active_context = plt.Circle((2000, 900), 40, fc='white', alpha=1.0, label='ball_context')
 
             xy1 = (self.ball_active_context.center[0], self.ball_active_context.center[1]+1.2*self.ball_active_context.radius)
-            self.ax.annotate("CONTEXT", xy=xy1, fontsize=10, ha="center")
             xy2 = (self.ball_active_goal.center[0], self.ball_active_goal.center[1]+1.2*self.ball_active_goal.radius)
-            self.ax.annotate("GOAL", xy=xy2, fontsize=10, ha="center")
             xy3 = (self.ball_active_subgoal.center[0], self.ball_active_subgoal.center[1] + 1.2 * self.ball_active_subgoal.radius)
-            self.ax.annotate("SUB-GOAL", xy=xy3, fontsize=10, ha="center")
 
             # Draw Movement boundaries
             plt.axhline(y=self.y_bounds[1], xmin=self.x_bounds[0]/self.x_plt_bounds[1], xmax=self.x_bounds[1]/self.x_plt_bounds[1], linestyle='--', color='grey')
@@ -625,8 +622,8 @@ class Baxter2Arms(Sim):
         self.baxter_left=Robot("baxter_left", 700, 300, 90)
         self.baxter_right=Robot("baxter_right", 1800, 300, 90)
         self.robots=[self.baxter_left, self.baxter_right]
-        self.baxter_left_limits=((100, 1250),self.y_bounds)
-        self.baxter_right_limts=((1050, 2400),self.y_bounds)
+        self.baxter_left_limits=((self.x_bounds[0], self.x_bounds[1]/2),self.y_bounds)
+        self.baxter_right_limits=((self.x_bounds[1]/2, self.x_bounds[1]),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
 
     def move_robot_arm(self, arm:Robot, vel):
@@ -761,7 +758,7 @@ class SimpleScenario(Baxter2Arms):
     """
     Class that implements a simple scenario with a Baxter robot and a ball.
     """
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, logger=None):
+    def __init__(self, x_size=(0, 2800), y_size=(0, 1550), x_bounds=(100, 2700), y_bounds=(50, 1350), visualize=True, logger=None):
         """
         Create the simple scenario with a Baxter robot and a ball.
 

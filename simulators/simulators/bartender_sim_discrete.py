@@ -5,6 +5,7 @@ import yamlloader
 from core.service_client import ServiceClient
 from core.cognitive_node import CognitiveNode
 import rclpy
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -95,8 +96,12 @@ class BartenderSim(Node):
             Float32,
             'cognitive_node/world_model/last_bottle',
             self.agent_bottle_callback,
-            10
+            qos_profile_sensor_data
         )
+
+    # ============================================================================
+    # CALLBACKS
+    # ============================================================================
 
     def agent_bottle_callback(self, msg):
         """
@@ -107,6 +112,83 @@ class BartenderSim(Node):
         """
         self.agent_bottle_choice = msg.data
         self.get_logger().debug(f"Received agent bottle choice from topic: {self.agent_bottle_choice}")
+
+    def new_command_callback(self, data):
+        """
+        Process a command received
+
+        :param data: The message that contais the command received.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
+        """
+        self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
+        self.iteration = data.iteration
+        self.update_reward_sensor()
+        if data.command == "reset_world":
+            self.reset_world(data)
+        elif data.command == "end":
+            self.get_logger().info("Ending simulator as requested by LTM...")
+            rclpy.shutdown()
+
+    def new_action_service_callback(self, request, response):
+        """
+        Execute a policy and publish new perceptions.
+
+        :param request: The message that contains the policy to execute.
+        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Request
+        :param response: Response of the success of the execution of the action.
+        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
+        :return: Response indicating the success of the action execution.
+        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
+        """
+        try:
+            self.get_logger().info("Executing policy " + str(request.policy))
+            self.get_logger().info(f"ITERATION: {self.iteration}")
+            
+            self.perceive_bottles()
+            self.perceive_glass()
+            self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
+            self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
+            
+            # Execute the requested policy
+            if hasattr(self, request.policy + "_policy"):
+                getattr(self, request.policy + "_policy")()
+            else:
+                self.get_logger().error(f"Policy {request.policy}_policy does not exist!")
+                response.success = False
+                return response
+            
+            self.perceive_bottles()
+            self.perceive_glass()
+            self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
+            self.update_reward_sensor()
+            self.publish_perceptions()
+            
+            response.success = True
+            return response
+            
+        except Exception as e:
+            self.get_logger().error(f"Error executing policy {request.policy}: {str(e)}")
+            response.success = False
+            return response
+
+    def world_reset_service_callback(self, request, response):
+        """
+        Callback for the world reset service.
+
+        :param request: The message that contains the request to reset the world.
+        :type request: ROS msg defined in the config file Typically cognitive_processes_interfaces.srv.WorldReset.Request
+        :param response: Response of the world reset service.
+        :type response: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        :return: Response indicating the success of the world reset.
+        :rtype: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
+        """
+        self.reset_world(request)
+        response.success=True
+        return response
+
+    # ============================================================================
+    # HELPER METHODS - GENERATION AND RANDOM POSITIONING
+    # ============================================================================
 
     def random_position(self, area):
         """
@@ -172,6 +254,40 @@ class BartenderSim(Node):
         glass = dict(distance=distance, angle=angle, state=False)
         self.glass.append(glass)
 
+    def generate_new_client(self):
+        """
+        Generate a new client with random ID and beverage preference.
+        """
+        # Generate new client with random ID from available clients
+        if self.bar_clients:
+            # Pick a random client from the generated clients
+            if self.training_mode == "deterministic":
+                new_client = self.bar_clients[0]
+            else:
+                new_client = self.rng.choice(self.bar_clients)
+
+            new_client_id = new_client["id"]
+            
+            # Set the new client
+            self.perceptions["client"].data[0].id = new_client_id
+            self.perceptions["client"].data[0].preference = 0  # Client hasn't been asked yet
+            
+            self.get_logger().info(f"{GREEN}NEW CLIENT ARRIVED! Client ID: {new_client_id}, Beverage preference: {new_client['beverage']}{RESET}")
+            
+            # Reset service tracking for new client
+            self.drink_was_served = False
+            self.reward_given_for_current_service = False
+            
+            # Clear asking iterations for fresh start
+            if hasattr(self, 'asking_iterations'):
+                self.asking_iterations = {}
+            
+            self.get_logger().info(f"{CYAN}Ready to serve new client!{RESET}")
+
+    # ============================================================================
+    # HELPER METHODS - PERCEPTION
+    # ============================================================================
+
     def perceive_bottles(self):
         """
         Perceive all bottles and update the bottle perceptions accordingly.
@@ -234,6 +350,71 @@ class BartenderSim(Node):
             self.perceptions["glass"].data[0].distance = glass["distance"]
             self.perceptions["glass"].data[0].angle = glass["angle"]
 
+    def publish_perceptions(self):
+        """
+        Publish the current perceptions to the corresponding topics.
+        """
+        for ident, publisher in self.sim_publishers.items():
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            publisher.publish(self.perceptions[ident])
+
+    def random_perceptions(self):
+        """
+        Generate random perceptions when the world is reset.
+        """
+        self.perceptions["client"].data = []
+        self.perceptions["client"].data.append(self.base_messages["client"]())
+        self.perceptions["client"].data[0].id = int(self.rng.integers(1, 4))  # Random client ID
+        self.perceptions["client"].data[0].preference = 0
+        self.perceptions["bottles"].data = []
+        self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
+
+        # Generate glass
+        self.perceptions["glass"].data = []
+        self.perceptions["glass"].data.append(self.base_messages["glass"]())
+        distance, angle = self.random_position(self.weighing_area)
+        self.perceptions["glass"].data[0].distance = distance
+        self.perceptions["glass"].data[0].angle = angle
+        self.perceptions["glass"].data[0].state = False
+
+        self.perceptions["robot_position"].data = 0.0 # Random initial position of the robot, 0 = preparation table, 1 = serving table
+
+        # Generate bottles and glass
+        self.generate_bottles()
+        self.generate_glass()
+
+        # Perceive the environment
+        self.perceive_bottles()
+        self.perceive_last_bottle()
+        self.perceive_glass()
+
+
+        self.perceptions["glass_in_left_hand"].data = False
+        self.perceptions["bottle_in_right_hand"].data = False
+
+        # Reset all client lifecycle tracking
+        self.drink_was_served = False
+        self.reward_given_for_current_service = False
+        self.client_drinking_countdown = 0
+        self.client_will_drink = False
+        self.client_departure_countdown = 0
+        self.client_will_leave = False
+        self.no_client_countdown = 0
+        self.waiting_for_new_client = False
+        
+        # Reset glass and position tracking
+        self.original_glass_pos = {}
+        self.last_glass_pos = {}
+        
+        # Reset asking iterations
+        if hasattr(self, 'asking_iterations'):
+            self.asking_iterations = {}
+
+        self.update_reward_sensor()
+
+    # ============================================================================
+    # HELPER METHODS - CLIENT LIFECYCLE SIMULATION
+    # ============================================================================
 
     def start_client_drinking(self):
         """
@@ -323,88 +504,36 @@ class BartenderSim(Node):
         self.waiting_for_new_client = True
         self.get_logger().info(f"{BLUE}Waiting {waiting_delay} iterations before new client arrives{RESET}")
 
-    def generate_new_client(self):
+    # ============================================================================
+    # HELPER METHODS - POSITION CHECKING
+    # ============================================================================
+
+    def is_at_preparation_table(self) -> bool:
         """
-        Generate a new client with random ID and beverage preference.
+        Returns True if the robot is at the preparation table.
+        Convention in this sim: robot_position ~ 0.0 -> preparation; ~0.95 -> serving.
+        We use a simple threshold at 0.5 for robustness.
         """
-        # Generate new client with random ID from available clients
-        if self.bar_clients:
-            # Pick a random client from the generated clients
-            if self.training_mode == "deterministic":
-                new_client = self.bar_clients[0]
-            else:
-                new_client = self.rng.choice(self.bar_clients)
+        try:
+            pos = float(self.perceptions["robot_position"].data)
+        except Exception:
+            pos = 0.0
+        at_prep = pos < 0.5
+        self.get_logger().info(f"Robot at preparation table: {at_prep} (pos={pos})")
+        return at_prep
 
-            new_client_id = new_client["id"]
-            
-            # Set the new client
-            self.perceptions["client"].data[0].id = new_client_id
-            self.perceptions["client"].data[0].preference = 0  # Client hasn't been asked yet
-            
-            self.get_logger().info(f"{GREEN}NEW CLIENT ARRIVED! Client ID: {new_client_id}, Beverage preference: {new_client['beverage']}{RESET}")
-            
-            # Reset service tracking for new client
-            self.drink_was_served = False
-            self.reward_given_for_current_service = False
-            
-            # Clear asking iterations for fresh start
-            if hasattr(self, 'asking_iterations'):
-                self.asking_iterations = {}
-            
-            self.get_logger().info(f"{CYAN}Ready to serve new client!{RESET}")
-
-    def reward_serve_the_drink_goal(self):
+    def is_at_serving_table(self) -> bool:
         """
-        Gives a reward of 1.0 if the glass with the CORRECT drink is placed in the serving table.
-        Only gives reward once per service cycle until glass returns to preparation area.
+        Returns True if the robot is at the serving table.
+        Uses the same thresholding as preparation helper.
         """
-        reward = 0.0
-        if self.iteration < self.change_reward_iterations['stage0']:
-            self.get_logger().info("Checking serve_glass_goal...")
-            
-            client_id = self.perceptions["client"].data[0].id
-            
-            # Skip if no valid client
-            if client_id == 0:
-                self.get_logger().info(f"{BLUE}No client present (ID=0), no service reward{RESET}")
-                self.perceptions["serve_the_drink_goal"].data = reward
-                return
-            
-            # Check if glass is in serving position and has drink
-            if self.glass_is_in_serving_position() and self.perceptions["glass"].data[0].state:
-                self.get_logger().info(f"{BLUE}GLASS IN SERVING POSITION WITH DRINK{RESET}")
-                
-                # Check if reward was already given for this service cycle
-                if self.reward_given_for_current_service:
-                    self.get_logger().info(f"{YELLOW}Reward already given for current service cycle{RESET}")
-                    reward = 1.0
-                else:
-                    # Check if the drink is correct for the client
-                    client_preference = self.know_preference.get(client_id, None)
-                    last_bottle_used = self.perceptions["last_bottle"].data
-
-                    if client_preference is not None and self.picked_bottle == client_preference:
-                        self.get_logger().info(f"{GREEN}CORRECT DRINK SERVED! Client {client_id} wanted {client_preference}, got {self.picked_bottle}{RESET}")
-                        reward = 1.0
-                        self.reward_given_for_current_service = True  # Mark reward as given
-                        
-                        # IMPORTANT: Mark that drink was served - enables return reward later
-                        self.drink_was_served = True
-                        self.get_logger().info(f"{PURPLE}Drink service completed - return reward now available{RESET}")
-                        
-                        # Start client drinking simulation
-                        self.start_client_drinking()
-                        
-                    else:
-                        self.get_logger().info(f"{RED}WRONG DRINK SERVED! Client {client_id} wanted {client_preference}, got {self.picked_bottle}{RESET}")
-                        reward = 1.0
-                        self.perceptions["glass"].data[0].state = False  # Glass is emptied (client refuses drink)
-            else:
-                reward = 0.0
-                self.get_logger().info(f"{BLUE}GLASS NOT IN SERVING POSITION OR NO DRINK{RESET}")
-
-            self.perceptions["serve_the_drink_goal"].data = reward
-
+        try:
+            pos = float(self.perceptions["robot_position"].data)
+        except Exception:
+            pos = 0.0
+        at_serv = pos >= 0.5
+        self.get_logger().info(f"Robot at serving table: {at_serv} (pos={pos})")
+        return at_serv
 
     def glass_is_in_the_original_position(self):
         """
@@ -428,74 +557,31 @@ class BartenderSim(Node):
         
         return distance_match and angle_match
 
-    def update_reward_sensor(self):
+    def glass_is_in_serving_position(self):
         """
-        Update goal sensors' values.
-        Also runs client drinking and departure simulation.
+        Check if the glass is in the serving position.
         """
-        # First run client lifecycle simulations
-        self.simulate_client_drinking()
-        self.simulate_client_departure()
+        glass = self.perceptions['glass'].data[0]
         
-        # Then update all reward sensors
-        for sensor in self.perceptions:
-            reward_method = getattr(self, "reward_" + sensor, None)
-            if callable(reward_method):
-                reward_method()
-
-    def random_perceptions(self):
-        """
-        Generate random perceptions when the world is reset.
-        """
-        self.perceptions["client"].data = []
-        self.perceptions["client"].data.append(self.base_messages["client"]())
-        self.perceptions["client"].data[0].id = int(self.rng.integers(1, 4))  # Random client ID
-        self.perceptions["client"].data[0].preference = 0
-        self.perceptions["bottles"].data = []
-        self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
-
-        # Generate glass
-        self.perceptions["glass"].data = []
-        self.perceptions["glass"].data.append(self.base_messages["glass"]())
-        distance, angle = self.random_position(self.weighing_area)
-        self.perceptions["glass"].data[0].distance = distance
-        self.perceptions["glass"].data[0].angle = angle
-        self.perceptions["glass"].data[0].state = False
-
-        self.perceptions["robot_position"].data = 0.0 # Random initial position of the robot, 0 = preparation table, 1 = serving table
-
-        # Generate bottles and glass
-        self.generate_bottles()
-        self.generate_glass()
-
-        # Perceive the environment
-        self.perceive_bottles()
-        self.perceive_last_bottle()
-        self.perceive_glass()
-
-
-        self.perceptions["glass_in_left_hand"].data = False
-        self.perceptions["bottle_in_right_hand"].data = False
-
-        # Reset all client lifecycle tracking
-        self.drink_was_served = False
-        self.reward_given_for_current_service = False
-        self.client_drinking_countdown = 0
-        self.client_will_drink = False
-        self.client_departure_countdown = 0
-        self.client_will_leave = False
-        self.no_client_countdown = 0
-        self.waiting_for_new_client = False
+        # If glass is "in hand" (negative coordinates), it's not in serving position
+        if glass.distance < 0 or glass.angle < 0:
+            self.get_logger().info(f"{BLUE}Glass is in hand, not in serving position{RESET}")
+            return False
         
-        # Reset glass and position tracking
-        self.original_glass_pos = {}
-        self.last_glass_pos = {}
-        
-        # Reset asking iterations
-        if hasattr(self, 'asking_iterations'):
-            self.asking_iterations = {}
+        # Fixing the serving position to a specific distance and angle
+        serving_pos = self.serving_pos
+        self.get_logger().info(f"{BLUE}Checking if glass is in serving position...{RESET}")
+        glass.distance = round(glass.distance, 1)
+        glass.angle = round(glass.angle, 1)
+        serving_pos['distance'] = round(serving_pos['distance'], 2)
+        serving_pos['angle'] = round(serving_pos['angle'], 2)
+        self.get_logger().info(f"Rounded glass position: distance={glass.distance}, angle={glass.angle}")
+        self.get_logger().info(f"Rounded expected serving position: distance={serving_pos['distance']}, angle={serving_pos['angle']}")
+        return (glass.distance == serving_pos['distance']) and (abs(glass.angle) == abs(serving_pos['angle']))
 
-        self.update_reward_sensor()
+    # ============================================================================
+    # POLICIES
+    # ============================================================================
 
     def pick_glass_policy(self):
         """
@@ -625,35 +711,6 @@ class BartenderSim(Node):
             if self.glass:
                 self.glass[0]["state"] = True
 
-    # --- Robot position helpers ------------------------------------------------
-    def is_at_preparation_table(self) -> bool:
-        """
-        Returns True if the robot is at the preparation table.
-        Convention in this sim: robot_position ~ 0.0 -> preparation; ~0.95 -> serving.
-        We use a simple threshold at 0.5 for robustness.
-        """
-        try:
-            pos = float(self.perceptions["robot_position"].data)
-        except Exception:
-            pos = 0.0
-        at_prep = pos < 0.5
-        self.get_logger().info(f"Robot at preparation table: {at_prep} (pos={pos})")
-        return at_prep
-
-    def is_at_serving_table(self) -> bool:
-        """
-        Returns True if the robot is at the serving table.
-        Uses the same thresholding as preparation helper.
-        """
-        try:
-            pos = float(self.perceptions["robot_position"].data)
-        except Exception:
-            pos = 0.0
-        at_serv = pos >= 0.5
-        self.get_logger().info(f"Robot at serving table: {at_serv} (pos={pos})")
-        return at_serv
-
-
     def place_glass_serving_policy(self):
         """
         Place the glass on the serving table, only if the robot is at the serving table
@@ -747,8 +804,6 @@ class BartenderSim(Node):
         else:
             self.perceptions["robot_position"].data = 0.95
 
-
-
     def ask_nicely_policy(self):
         """
         Ask the client the preferred beverage.
@@ -802,27 +857,72 @@ class BartenderSim(Node):
                 # Clear the iteration log for this client so it can be asked again
                 del self.asking_iterations[client_id]
 
-    def glass_is_in_serving_position(self):
+    # ============================================================================
+    # REWARDS
+    # ============================================================================
+
+    def reward_serve_the_drink_goal(self):
         """
-        Check if the glass is in the serving position.
+        Gives a reward of 1.0 if the glass with the CORRECT drink is placed
+        in the serving table. Reward is only emitted once per service cycle.
         """
-        glass = self.perceptions['glass'].data[0]
-        
-        # If glass is "in hand" (negative coordinates), it's not in serving position
-        if glass.distance < 0 or glass.angle < 0:
-            self.get_logger().info(f"{BLUE}Glass is in hand, not in serving position{RESET}")
-            return False
-        
-        # Fixing the serving position to a specific distance and angle
-        serving_pos = self.serving_pos
-        self.get_logger().info(f"{BLUE}Checking if glass is in serving position...{RESET}")
-        glass.distance = round(glass.distance, 1)
-        glass.angle = round(glass.angle, 1)
-        serving_pos['distance'] = round(serving_pos['distance'], 2)
-        serving_pos['angle'] = round(serving_pos['angle'], 2)
-        self.get_logger().info(f"Rounded glass position: distance={glass.distance}, angle={glass.angle}")
-        self.get_logger().info(f"Rounded expected serving position: distance={serving_pos['distance']}, angle={serving_pos['angle']}")
-        return (glass.distance == serving_pos['distance']) and (abs(glass.angle) == abs(serving_pos['angle']))
+        reward = 0.0
+
+        # 1. Check for valid stage configuration
+        if "stage0" not in self.change_reward_iterations:
+            self.get_logger().warn("No stage0 defined in experiment stages.")
+            self.perceptions["serve_the_drink_goal"].data = reward
+            return
+
+        # 2. Apply only before stage0 cutoff
+        if self.iteration >= self.change_reward_iterations["stage0"]:
+            self.perceptions["serve_the_drink_goal"].data = 0.0
+            return
+
+        client_id = self.perceptions["client"].data[0].id
+
+        # 3. No valid client
+        if client_id == 0:
+            self.get_logger().debug("No client present (ID=0).")
+            self.perceptions["serve_the_drink_goal"].data = 0.0
+            return
+
+        # 4. Check glass position and state
+        in_pos = self.glass_is_in_serving_position()
+        has_drink = self.perceptions["glass"].data[0].state
+
+        if not (in_pos and has_drink):
+            self.get_logger().debug("Glass not in serving position or empty.")
+            self.perceptions["serve_the_drink_goal"].data = 0.0
+            return
+
+        # 5. Reward already given for this cycle
+        if self.reward_given_for_current_service:
+            self.get_logger().debug("Reward already given this cycle.")
+            self.perceptions["serve_the_drink_goal"].data = 0.0
+            return
+
+        # 6. Evaluate correctness of the drink
+        client_preference = self.know_preference.get(client_id)
+        correct = (client_preference is not None and self.picked_bottle == client_preference)
+
+        if correct:
+            reward = 1.0
+            self.reward_given_for_current_service = True
+            self.drink_was_served = True
+            self.start_client_drinking()
+            self.get_logger().info(
+                f"Reward: correct drink served to client {client_id} (bottle {self.picked_bottle})."
+            )
+        else:
+            # Wrong drink served: client rejects it
+            self.perceptions["glass"].data[0].state = False
+            self.get_logger().info(
+                f"Wrong drink served to client {client_id}: expected {client_preference}, got {self.picked_bottle}."
+            )
+
+        # 7. Update the reward perception
+        self.perceptions["serve_the_drink_goal"].data = reward
 
 
     def reward_left_the_glass_goal(self):
@@ -853,7 +953,7 @@ class BartenderSim(Node):
                 self.get_logger().info(f"{CYAN}Service was completed: {service_was_completed}{RESET}")
                 self.get_logger().info(f"{CYAN}Client has left: {client_has_left} (current client ID: {self.perceptions['client'].data[0].id}){RESET}")
                 
-                if glass_is_empty and service_was_completed and client_has_left:
+                if glass_is_empty and service_was_completed:
                     reward = 1.0
                     self.get_logger().info(f"{GREEN}FULL CYCLE COMPLETED! Client drank, left, and glass returned to preparation table{RESET}")
                     
@@ -874,7 +974,6 @@ class BartenderSim(Node):
     
         self.perceptions["left_the_glass_goal"].data = reward
 
-
     def update_reward_sensor(self):
         """
         Update goal sensors' values.
@@ -890,13 +989,9 @@ class BartenderSim(Node):
             if callable(reward_method):
                 reward_method()
 
-    def publish_perceptions(self):
-        """
-        Publish the current perceptions to the corresponding topics.
-        """
-        for ident, publisher in self.sim_publishers.items():
-            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
-            publisher.publish(self.perceptions[ident])
+    # ============================================================================
+    # WORLD RESET AND SETUP
+    # ============================================================================
 
     def reset_world(self, request=None):
         """
@@ -950,79 +1045,9 @@ class BartenderSim(Node):
             self.get_logger().error(f"Traceback: {traceback.format_exc()}")
             raise
 
-    def world_reset_service_callback(self, request, response):
-        """
-        Callback for the world reset service.
-
-        :param request: The message that contains the request to reset the world.
-        :type request: ROS msg defined in the config file Typically cognitive_processes_interfaces.srv.WorldReset.Request
-        :param response: Response of the world reset service.
-        :type response: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
-        :return: Response indicating the success of the world reset.
-        :rtype: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Response
-        """
-        self.reset_world(request)
-        response.success=True
-        return response
-
-    def new_command_callback(self, data):
-        """
-        Process a command received
-
-        :param data: The message that contais the command received.
-        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
-        """
-        self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
-        self.iteration = data.iteration
-        self.update_reward_sensor()
-        if data.command == "reset_world":
-            self.reset_world(data)
-        elif data.command == "end":
-            self.get_logger().info("Ending simulator as requested by LTM...")
-            rclpy.shutdown()
-
-    def new_action_service_callback(self, request, response):
-        """
-        Execute a policy and publish new perceptions.
-
-        :param request: The message that contains the policy to execute.
-        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Request
-        :param response: Response of the success of the execution of the action.
-        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
-        :return: Response indicating the success of the action execution.
-        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.Policy.Response
-        """
-        try:
-            self.get_logger().info("Executing policy " + str(request.policy))
-            self.get_logger().info(f"ITERATION: {self.iteration}")
-            
-            self.perceive_bottles()
-            self.perceive_glass()
-            self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
-            self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
-            
-            # Execute the requested policy
-            if hasattr(self, request.policy + "_policy"):
-                getattr(self, request.policy + "_policy")()
-            else:
-                self.get_logger().error(f"Policy {request.policy}_policy does not exist!")
-                response.success = False
-                return response
-            
-            self.perceive_bottles()
-            self.perceive_glass()
-            self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
-            self.update_reward_sensor()
-            self.publish_perceptions()
-            
-            response.success = True
-            return response
-            
-        except Exception as e:
-            self.get_logger().error(f"Error executing policy {request.policy}: {str(e)}")
-            response.success = False
-            return response
-    
+    # ============================================================================
+    # CONFIGURATION AND SETUP
+    # ============================================================================
 
     def setup_experiment_stages(self, stages):
         """
@@ -1126,6 +1151,11 @@ class BartenderSim(Node):
                 self.setup_control_channel(config["Control"])
         
         self.load_experiment_file_in_commander()
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def main(args=None):
     rclpy.init(args=args)

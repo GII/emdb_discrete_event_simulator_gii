@@ -588,12 +588,30 @@ class Sim(object):
         :type x1_y1: tuple
         :param x2_y2: Tuple with the coordinates of the second point (x2, y2).
         :type x2_y2: tuple
-        :return: Relative angle in degrees between the two points.
+        :return: Relative angle in degrees between the two points. If both positions are equal,
+                 returns 0.0.
         :rtype: float
         """
         (x1, y1) = x1_y1
         (x2, y2) = x2_y2
+        # Handle identical positions (avoid undefined direction). Use math.isclose for floats.
+        if math.isclose(x1, x2) and math.isclose(y1, y2):
+            return 0.0
         return math.atan2(y2 - y1, x2 - x1) * 180 / math.pi
+    
+    @staticmethod
+    def get_distance(x1_y1, x2_y2):
+        """
+        Return the Euclidean distance between two points.
+
+        :param x1_y1: Tuple with the coordinates of the first point (x1, y1).
+        :type x1_y1: tuple
+        :param x2_y2: Tuple with the coordinates of the second point (x2, y2).
+        :type x2_y2: tuple
+        :return: Euclidean distance between the two points.
+        :rtype: float
+        """
+        return distance.euclidean(x1_y1, x2_y2)
 
 
 
@@ -626,9 +644,10 @@ class Baxter2Arms(Sim):
         self.baxter_left=Robot("baxter_left", 700, 300, 90)
         self.baxter_right=Robot("baxter_right", 1800, 300, 90)
         self.robots=[self.baxter_left, self.baxter_right]
-        self.baxter_left_limits=((self.x_bounds[0], self.x_bounds[1]/2),self.y_bounds)
-        self.baxter_right_limits=((self.x_bounds[1]/2, self.x_bounds[1]),self.y_bounds)
+        self.baxter_left_limits=((self.x_bounds[0], (self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0]),self.y_bounds)
+        self.baxter_right_limits=(((self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0], self.x_bounds[1]),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
+        self.grasp_range = 80.0  # Range to grasp objects
 
     def move_robot_arm(self, arm:Robot, vel):
         """
@@ -809,7 +828,7 @@ class SimpleScenario(Baxter2Arms):
         for robot in self.robots:
             #Catch close objects
             if robot.gripper_state and not robot.catched_object:
-                close_object=self.filter_entities(self.get_close_entities(robot, threshold=50), EntityType.BALL)
+                close_object=self.filter_entities(self.get_close_entities(robot, threshold=self.grasp_range), EntityType.BALL)
                 if close_object:
                     if not close_object[0].catched_by:
                         robot.catched_object=close_object[0]
@@ -819,7 +838,7 @@ class SimpleScenario(Baxter2Arms):
                 robot.catched_object=None
 
             #Check if something is in the box
-            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=50), EntityType.BALL)
+            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=self.grasp_range), EntityType.BALL)
             self.box1.contents=[]
             for obj in objs_close:
                 if not obj.catched_by:
@@ -858,7 +877,7 @@ class SimpleScenario(Baxter2Arms):
         #TODO: Reset grippers
 
         first_shuffle=True
-        while any([distance.euclidean(self.box1.get_pos(), obj.get_pos()) < 50 for obj in self.objects]) or first_shuffle:
+        while any([distance.euclidean(self.box1.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or any([distance.euclidean(self.baxter_left.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or any([distance.euclidean(self.baxter_right.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or first_shuffle:
             self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
             for object in self.objects:
                 object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))

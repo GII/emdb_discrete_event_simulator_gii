@@ -28,12 +28,10 @@ class BartenderSim(Node):
         self.base_messages = {}
         self.perceptions = {}
         self.sim_publishers = {}
-        
-        # Simulation steps
         self.steps = ["on_prep","on_prep_with_glass","on_prep_with_bottle","on_prep_with_both", "on_prep_with_glass_served",
                       "holding_glass_at_serv","holding_both_at_serv"]
 
-        self.random_seed = self.declare_parameter('random_seed', value = 1000).get_parameter_value().integer_value
+        self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
         
         self.bottles = []
@@ -42,7 +40,6 @@ class BartenderSim(Node):
         self.picked_bottle = 0
         self.agent_bottle_choice = None
         self.know_preference = {}
-        self.once = True
 
         self.prep_area = {"x_min": 0.0, "x_max": 0.6, "y_min": 0.9, "y_max": 1.1, "object": "bottles"}
         self.serv_area = {"x_min": 0.4, "x_max": 0.7, "y_min": 0.5, "y_max": 0.9, "object": "glass"}
@@ -174,13 +171,11 @@ class BartenderSim(Node):
             self.perceptions["bottle_in_right_hand"].data = False
             self.perceptions["glass"].data[0].distance = 0.0
             self.perceptions["glass"].data[0].angle = 0.0
-            self.once = False
 
         elif step == "on_prep_with_bottle":
             self.perceptions["robot_position"].data = 0.0
             self.perceptions["glass_in_left_hand"].data = False
             self.perceptions["bottle_in_right_hand"].data = True
-            self.once = False
 
         elif step == "on_prep_with_both":
             self.perceptions["robot_position"].data = 0.0
@@ -188,7 +183,6 @@ class BartenderSim(Node):
             self.perceptions["bottle_in_right_hand"].data = True
             self.perceptions["glass"].data[0].distance = 0.0
             self.perceptions["glass"].data[0].angle = 0.0
-            self.once = False
         
         elif step == "on_prep_with_glass_served":
             self.perceptions["robot_position"].data = 0.0
@@ -198,7 +192,6 @@ class BartenderSim(Node):
             self.perceptions["glass"].data[0].angle = 0.0
             self.perceptions["glass"].data[0].state = True
             self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
 
         elif step == "holding_glass_at_serv":
             self.perceptions["robot_position"].data = 0.95
@@ -208,7 +201,6 @@ class BartenderSim(Node):
             self.perceptions["glass"].data[0].angle = 0.0
             self.perceptions["glass"].data[0].state = True
             self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
 
         elif step == "holding_both_at_serv":
             self.perceptions["robot_position"].data = 0.95
@@ -218,7 +210,6 @@ class BartenderSim(Node):
             self.perceptions["glass"].data[0].angle = 0.0
             self.perceptions["glass"].data[0].state = True
             self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
     
         
         # Client
@@ -262,16 +253,38 @@ class BartenderSim(Node):
 
 
     def pick_glass_policy(self):
+        if self.perceptions["glass_in_left_hand"].data:
+            return False
+        if not self.glass:
+            return False
+
+        # Check spatial consistency: Robot and Glass must be at the same table (Prep or Serv)
+        at_prep = self.is_at_preparation_table()
+        at_serv = self.is_at_serving_table()
+        glass_in_prep = self.glass_is_in_preparation_area()
+        glass_in_serv = self.glass_is_in_serving_position()
+
+        if not ((at_prep and glass_in_prep) or (at_serv and glass_in_serv)):
+            self.get_logger().info(f"[BLOCKED] pick_glass: spatial mismatch. Robot(prep={at_prep}, serv={at_serv}) vs Glass(prep={glass_in_prep}, serv={glass_in_serv})")
+            return False
+
+        cur = self.perceptions["glass"].data[0]
+        self.perceptions["glass_in_left_hand"].data = True
         self.perceptions["glass"].data[0].distance = 0.0
         self.perceptions["glass"].data[0].angle = 0.0
-        if self.perceptions["glass_in_left_hand"].data:
-            return
-        
-        if self.perceptions["robot_position"].data < 0.2:
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-        
+        if not self.original_glass_pos:
+            self.original_glass_pos = {"distance": float(cur.distance), "angle": float(cur.angle)}
+        self.last_glass_pos = {"distance": float(cur.distance), "angle": float(cur.angle)}
+
+        IN_HAND_DISTANCE = 0.0
+        IN_HAND_ANGLE = 0.0
+        self.perceptions["glass"].data[0].distance = IN_HAND_DISTANCE
+        self.perceptions["glass"].data[0].angle = IN_HAND_ANGLE
+        if self.glass:
+            self.glass["distance"] = IN_HAND_DISTANCE
+            self.glass["angle"] = IN_HAND_ANGLE
+        self.get_logger().info(f"Glass picked")
+        return True
 
     def pick_bottle_policy(self):
         """
@@ -318,10 +331,18 @@ class BartenderSim(Node):
             return
         
         self.perceptions["glass_in_left_hand"].data = False
+        self.glass["distance"] = self.serving_pos["distance"]
+        self.glass["angle"] = self.serving_pos["angle"]
         self.perceptions["glass"].data[0].distance = self.serving_pos["distance"]
         self.perceptions["glass"].data[0].angle = self.serving_pos["angle"]
-        self.perceptions["glass"].data[0].was_used = True
-        self.perceptions["glass"].data[0].state = False  # After placing, glass is empty (client will drink)
+        
+        if self.perceptions["glass"].data[0].state:
+             self.glass["state"] = False
+             self.glass["drink_type"] = 0.0
+             self.glass["was_used"] = True
+             self.perceptions["glass"].data[0].state = False
+             self.perceptions["glass"].data[0].drink_type = 0.0
+             self.perceptions["glass"].data[0].was_used = True
 
     def place_glass_return_policy(self):
         """
@@ -355,12 +376,9 @@ class BartenderSim(Node):
         Toggle robot position between prep and serving.
         """
         if self.is_at_preparation_table():
-                self.perceptions["robot_position"].data = 0.95
-        elif self.is_at_serving_table():
-            self.perceptions["robot_position"].data = 0.0
+            self.perceptions["robot_position"].data = 0.95
         else:
             self.perceptions["robot_position"].data = 0.0
-            
 
     def ask_nicely_policy(self):
         """
@@ -384,6 +402,7 @@ class BartenderSim(Node):
         """
         Calculate progress reward.
         """
+        # Logic copied/adapted from bartender_sim_discrete_rl.py
         has_glass = self.perceptions["glass_in_left_hand"].data
         has_bottle = self.perceptions["bottle_in_right_hand"].data
         
@@ -415,31 +434,33 @@ class BartenderSim(Node):
             step = 0.8 # Client drank
         elif glass_at_serving and glass_state and not has_glass:
             step = 0.6
-        elif at_serv and has_glass and glass_state and self.once:
+        elif at_serv and has_glass and glass_state:
             step = 0.5
-            self.once = False
         elif at_prep and has_glass and glass_state:
             step = 0.4
-            self.once = True
         elif has_glass and has_bottle and at_prep:
             step = 0.25
         elif has_glass and at_prep:
             step = 0.15
         elif has_bottle and at_prep:
             step = 0.1
-        elif at_prep and not has_glass and not has_bottle and self.once:
+        elif at_prep and not has_glass and not has_bottle:
             step = 0.05
-            self.once = False
             
         self.perceptions["progress_goal"].data = float(step)
-        self.get_logger().info(f"Progress goal reward: {step}")
 
     def reward_serve_the_drink_goal(self):
         reward = 0.0
+        # If glass is at serving and has drink (or was just drunk?)
+        # The original code gave 1.0 if glass.state is True (has drink) and is at serving pos.
+        # But wait, if client drinks, state becomes False.
+        # So we should reward when it is placed.
+        # In fruit shop, rewards are calculated based on state.
         
         g_dist = self.perceptions["glass"].data[0].distance
         g_ang = self.perceptions["glass"].data[0].angle
-        glass_at_serving = self.glass_is_in_serving_position()
+        glass_at_serving = (abs(g_dist - self.serving_pos["distance"]) < 0.1 and 
+                            abs(g_ang - self.serving_pos["angle"]) < 0.1)
                             
         if glass_at_serving and self.perceptions["glass"].data[0].was_used:
              reward = 1.0

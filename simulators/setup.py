@@ -24,6 +24,7 @@ setup(
             'fruit_shop_simulator = simulators.fruit_shop_sim_discrete:main', 
             'pump_panel_simulator = simulators.pump_panel_sim_discrete:main',
             'bartender_simulator = simulators.bartender_sim_discrete:main',
+            'bartender_rl_simulator = simulators.bartender_sim_discrete_rl:main',
         ],
     },
 )

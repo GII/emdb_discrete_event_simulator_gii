@@ -621,7 +621,7 @@ class Baxter2Arms(Sim):
     """
     Class that simulates the Baxter robot.
     """
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
+    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), grasp_range=80.0, visualize=True, verbose=False):
         """
         Create the Baxter robot with two arms.
 
@@ -647,7 +647,7 @@ class Baxter2Arms(Sim):
         self.baxter_left_limits=((self.x_bounds[0], (self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0]),self.y_bounds)
         self.baxter_right_limits=(((self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0], self.x_bounds[1]),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
-        self.grasp_range = 80.0  # Range to grasp objects
+        self.grasp_range = grasp_range  # Range to grasp objects
 
     def move_robot_arm(self, arm:Robot, vel):
         """
@@ -781,7 +781,7 @@ class SimpleScenario(Baxter2Arms):
     """
     Class that implements a simple scenario with a Baxter robot and a ball.
     """
-    def __init__(self, x_size=(0, 2800), y_size=(0, 1550), x_bounds=(100, 2700), y_bounds=(50, 1350), visualize=True, logger=None):
+    def __init__(self, x_size=(0, 2800), y_size=(0, 1550), x_bounds=(100, 2700), y_bounds=(50, 1350), grasp_range=80.0, place_range=80.0, visualize=True, logger=None):
         """
         Create the simple scenario with a Baxter robot and a ball.
 
@@ -798,7 +798,7 @@ class SimpleScenario(Baxter2Arms):
         :param logger: Logger to log debug information.
         :type logger: rclpy.impl.rcutils_logger.RcutilsLogger
         """
-        super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
+        super().__init__(x_size, y_size, x_bounds, y_bounds, grasp_range, visualize)
         self.logger:RcutilsLogger=logger
         ##Objects
         self.objects=[]
@@ -807,6 +807,7 @@ class SimpleScenario(Baxter2Arms):
 
         ##Boxes
         self.box1 = Box("box_1", 900, 400, w=150, h=150)
+        self.place_range = place_range  # Range to place objects in the box
         self.entities.append(self.box1)
         
         # Show figure and patches
@@ -838,7 +839,7 @@ class SimpleScenario(Baxter2Arms):
                 robot.catched_object=None
 
             #Check if something is in the box
-            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=self.grasp_range), EntityType.BALL)
+            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=self.place_range), EntityType.BALL)
             self.box1.contents=[]
             for obj in objs_close:
                 if not obj.catched_by:
@@ -883,11 +884,12 @@ class SimpleScenario(Baxter2Arms):
                 object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
                 object.catched_by=None
             first_shuffle=False
+        self.world_rules()
 
 
 if __name__ == '__main__':
     """Simulator Demo"""
-    a = ComplexScenario()
+    a = SimpleScenario()
 
     while True:
         vel_l=random.uniform(0, 60)

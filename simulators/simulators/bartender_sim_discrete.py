@@ -13,58 +13,57 @@ from core.utils import class_from_classname
 import numpy as np
 import random
 
-class BartenderSim(Node):
+class BartenderSim:
     """
-    BartenderSim simulator class.
+    BartenderSim simulator class - Pure simulation logic without ROS communication.
     """
-    def __init__(self):
+    def __init__(self, random_seed=1000):
         """
         Constructor of the BartenderSim simulator class.
-        Initializes the simulator with parameters, publishers, and perception messages.
+        Initializes the simulator with state tracking only.
         """
-        super().__init__("BartenderSim")
         self.rng = None
-        self.ident = None
-        self.base_messages = {}
-        self.perceptions = {}
-        self.sim_publishers = {}
+        self.random_seed = random_seed
         
         # Simulation steps
-        self.steps = ["on_prep","on_prep_with_glass","on_prep_with_bottle","on_prep_with_both", "on_prep_with_glass_served",
-                      "holding_glass_at_serv","holding_both_at_serv"]
+        self.steps = ["on_prep","on_prep_with_glass"]
 
-        self.random_seed = self.declare_parameter('random_seed', value = 1000).get_parameter_value().integer_value
-        self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
-        
         self.bottles = []
         self.glass = None
         self.original_glass_pos = {}
         self.picked_bottle = 0
         self.agent_bottle_choice = None
         self.know_preference = {}
-        self.once = True
+        self.once_at_prep = True
+        self.once_at_serv = True
 
         self.prep_area = {"x_min": 0.0, "x_max": 0.6, "y_min": 0.9, "y_max": 1.1, "object": "bottles"}
         self.serv_area = {"x_min": 0.4, "x_max": 0.7, "y_min": 0.5, "y_max": 0.9, "object": "glass"}
         self.serving_pos = {"distance": 0.8, "angle": 0.0}
 
-        self.iteration = 0
-        self.change_reward_iterations = {}
-
-        self.cbgroup_server=MutuallyExclusiveCallbackGroup()
-        self.cbgroup_client=MutuallyExclusiveCallbackGroup()
-
-        self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
+        # Simulation state
+        self.robot_position = 0.0
+        self.glass_in_left_hand = False
+        self.bottle_in_right_hand = False
+        self.client_id = 1
+        self.client_preference = 0
         
-        self.agent_bottle_subscription = self.create_subscription(
-            Float32,
-            "cognitive_node/world_model/last_bottle",
-            self.agent_bottle_callback,
-            10
-        )
+        self.iteration = 0
+        self.last_step = -1.0
+        self.last_policy_executed = None
+        self.prev_policy_executed = None
+        self.policy_sequence = []  # Track sequence of policies for detecting loops
+        self.sequence_repeat_count = 0  # Count how many times a pattern repeats
+        
+        # Initialize RNG
+        if self.random_seed:
+            self.rng = numpy.random.default_rng(self.random_seed)
+        else:
+            self.rng = numpy.random.default_rng()
 
-    def agent_bottle_callback(self, msg):
-        self.agent_bottle_choice = float(msg.data)
+    def set_agent_bottle_choice(self, bottle_id):
+        """Set the agent's bottle choice."""
+        self.agent_bottle_choice = float(bottle_id)
 
     def random_position(self, area):
         """
@@ -85,20 +84,12 @@ class BartenderSim(Node):
 
             valid = True
             
-            key = area.get("object")
-            if key and key in self.perceptions and hasattr(self.perceptions[key], "data"):
-                # Check collision with existing objects of the same type
-                # This is a simplification from fruit_shop which checked against all objects in the area
-                # For bartender, we mainly care about bottles not overlapping
-                pass 
-            
         return dist, ang
 
     def generate_bottles(self, n_bottles=3):
         """
         Generate a number of bottles with random positions.
         """
-        self.get_logger().info("Generating bottles...")
         self.bottles = []
         for i in range(1, n_bottles + 1):
             distance, angle = self.random_position(self.prep_area)
@@ -109,18 +100,576 @@ class BartenderSim(Node):
         """
         Generate a glass with random position.
         """
-        self.get_logger().info("Generating glass...")
-        distance, angle = self.random_position(self.prep_area)
+        distance, angle = 0.0, 0.0
         self.glass = dict(distance=distance, angle=angle, state=False, drink_type=0.0, was_used=False)
         self.original_glass_pos = {"distance": distance, "angle": angle}
 
+    def get_bottles_state(self):
+        """
+        Get the current state of bottles.
+        Returns a list of bottle dictionaries.
+        """
+        if not self.bottles:
+            return []
+        return [{"distance": float(b["distance"]), "angle": float(b["angle"]), "id": int(b["id"])} for b in self.bottles]
+
+    def get_glass_state(self):
+        """
+        Get the current state of the glass.
+        Returns a dictionary with glass properties.
+        """
+        if not self.glass:
+            return {"distance": 0.0, "angle": 0.0, "state": False, "drink_type": 0.0, "was_used": False}
+        return {
+            "distance": float(self.glass["distance"]),
+            "angle": float(self.glass["angle"]),
+            "state": bool(self.glass["state"]),
+            "drink_type": float(self.glass["drink_type"]),
+            "was_used": bool(self.glass["was_used"])
+        }
+
+    def reset_world(self):
+        """
+        Reset the world to a new state.
+        """
+        self.picked_bottle = 0
+        self.agent_bottle_choice = None
+        self.last_step = -1.0
+        self.prev_policy_executed = None
+        self.last_policy_executed = None
+        self.policy_sequence = []  # Reset policy sequence on world reset
+        self.sequence_repeat_count = 0
+        
+        # Generate environment
+        self.generate_bottles()
+        self.generate_glass()
+
+        step = random.choice(self.steps)
+
+        if step == "on_prep":
+            # Robot at prep, no glass, no bottle
+            self.robot_position = 0.0
+            self.glass_in_left_hand = False
+            self.bottle_in_right_hand = False
+
+        elif step == "on_prep_with_glass":
+            self.robot_position = 0.0
+            self.glass_in_left_hand = True
+            self.bottle_in_right_hand = False
+            self.glass["distance"] = 0.0
+            self.glass["angle"] = 0.0
+            self.once = False
+
+        elif step == "on_prep_with_bottle":
+            self.robot_position = 0.0
+            self.glass_in_left_hand = False
+            self.bottle_in_right_hand = True
+            self.once = False
+
+        elif step == "on_prep_with_both":
+            self.robot_position = 0.0
+            self.glass_in_left_hand = True
+            self.bottle_in_right_hand = True
+            self.glass["distance"] = 0.0
+            self.glass["angle"] = 0.0
+            self.once = False
+        
+        elif step == "on_prep_with_glass_served":
+            self.robot_position = 0.0
+            self.glass_in_left_hand = True
+            self.bottle_in_right_hand = False
+            self.glass["distance"] = 0.0
+            self.glass["angle"] = 0.0
+            self.glass["state"] = True
+            self.glass["drink_type"] = 1.0
+            self.once = False
+
+        elif step == "holding_glass_at_serv":
+            self.robot_position = 0.95
+            self.glass_in_left_hand = True
+            self.bottle_in_right_hand = False
+            self.glass["distance"] = 0.0
+            self.glass["angle"] = 0.0
+            self.glass["state"] = True
+            self.glass["drink_type"] = 1.0
+            self.once = False
+
+        elif step == "holding_both_at_serv":
+            self.robot_position = 0.95
+            self.glass_in_left_hand = True
+            self.bottle_in_right_hand = True
+            self.glass["distance"] = 0.0
+            self.glass["angle"] = 0.0
+            self.glass["state"] = True
+            self.glass["drink_type"] = 1.0
+            self.once = False
+    
+        # Client
+        cid = 1
+        self.client_id = cid
+        if cid in self.know_preference:
+            self.client_preference = 1
+        else:
+            self.client_preference = 0
+    
+    def is_at_preparation_table(self):
+        return self.robot_position < 0.2
+
+    def is_at_serving_table(self):
+        return self.robot_position >= 0.8
+
+    def glass_is_in_serving_position(self):
+        if not self.glass:
+            return False
+        if self.glass["distance"] >= 0.7:
+            return True
+        else:
+            return False
+        # if not self.glass:
+        #     return False
+        # g = self.glass
+        # if float(g["distance"]) < 0 or float(g["angle"]) < 0:
+        #     return False
+        # # rounded equality check
+        # gd = round(float(g["distance"]), 1)
+        # ga = round(float(g["angle"]), 1)
+        # sd = round(float(self.serving_pos["distance"]), 2)
+        # sa = round(float(self.serving_pos["angle"]), 2)
+        # return (gd == sd) and (abs(ga) == abs(sa))
+
+    def glass_is_in_preparation_area(self):
+        if not self.glass:
+            return False
+        if self.glass["distance"] < 0.2:
+            return True
+        else:
+            return False
+        # if not self.glass:
+        #     return False
+        # g = self.glass
+        # d = float(g["distance"])
+        # a = float(g["angle"])
+        # # Convert polar (d, a) back to Cartesian (x, y) assuming a = arctan2(x, y)
+        # x = d * np.sin(a)
+        # y = d * np.cos(a)
+        # area = self.prep_area
+        # return (area["x_min"] <= x <= area["x_max"]) and (area["y_min"] <= y <= area["y_max"])
+
+
+    def pick_glass_policy(self):
+        if self.glass_in_left_hand:
+            return
+        
+        if self.robot_position < 0.2 and self.glass_is_in_preparation_area():
+            self.glass_in_left_hand = True
+            if self.glass:
+                self.glass["distance"] = 0.5
+                self.glass["angle"] = 0.0
+        if self.robot_position >= 0.8 and self.glass_is_in_serving_position():
+            self.glass_in_left_hand = True
+            if self.glass:
+                self.glass["distance"] = 0.5
+                self.glass["angle"] = 0.0
+
+    def pick_bottle_policy(self):
+        """
+        Pick a bottle based on agent choice.
+        """
+        if self.bottle_in_right_hand:
+            return
+        
+        if not self.is_at_preparation_table():
+            return
+            
+        bottle_id = 1
+        if bottle_id == 0:
+            return
+
+        self.bottle_in_right_hand = True
+        self.picked_bottle = int(bottle_id)
+        for b in self.bottles:
+            if int(b["id"]) == self.picked_bottle:
+                b["distance"] = 0.0
+                b["angle"] = 1.4
+                break
+
+    def prepare_drink_policy(self):
+        """
+        Prepare the drink if holding glass and bottle.
+        """
+        if not self.glass_in_left_hand:
+            return
+        if not self.bottle_in_right_hand:
+            return
+        if self.glass and self.glass["state"]:
+            return
+
+        if self.glass:
+            self.glass["state"] = True
+            self.glass["drink_type"] = float(self.picked_bottle)
+
+    def place_glass_policy(self):
+        """
+        Place glass in appropriate location based on context.
+        - At serving table with prepared drink: place on serving area
+        - At prep table with used glass: return to original position
+        """
+        if not self.glass_in_left_hand:
+            return
+        
+        if self.is_at_serving_table():
+            # Place glass on serving table if holding it
+            self.glass_in_left_hand = False
+            if self.glass:
+                self.glass["distance"] = self.serving_pos["distance"]
+                self.glass["angle"] = self.serving_pos["angle"]
+                if self.glass["state"]:
+                    self.glass["was_used"] = True
+                    self.glass["state"] = False  # After placing, glass is empty (client will drink)
+        
+        # elif self.is_at_preparation_table():
+        #     # Return glass to preparation area if holding used glass
+        #     self.glass_in_left_hand = False
+        #     if self.glass:
+        #         self.glass["distance"] = self.original_glass_pos["distance"]
+        #         self.glass["angle"] = self.original_glass_pos["angle"]
+
+    # def place_bottle_policy(self):
+    #     """
+    #     Place bottle back.
+    #     """
+    #     if not self.is_at_preparation_table():
+    #         return
+    #     if not self.bottle_in_right_hand:
+    #         return
+            
+    #     self.bottle_in_right_hand = False
+    #     self.picked_bottle = 0
+    #     for b in self.bottles:
+    #         distance, angle = self.random_position(self.prep_area)
+    #         b["distance"] = distance
+    #         b["angle"] = angle  
+            
+
+    # def change_position_policy(self):
+    #     """
+    #     Toggle robot position between prep and serving.
+    #     Restricted: Can only go to serving if holding glass with prepared drink
+    #     """
+    #     if self.is_at_preparation_table():
+    #         # Only allow moving to serving if holding glass with prepared drink
+    #         if self.glass_in_left_hand and self.glass and self.glass["state"]:
+    #             self.robot_position = 0.95
+    #     # elif self.is_at_serving_table():
+    #     #     # Allow returning to prep if: not holding glass, OR holding used glass
+    #     #     if not self.glass_in_left_hand:
+    #     #         self.robot_position = 0.0
+    #     #     elif self.glass and self.glass["was_used"]:
+    #     #         self.robot_position = 0.0
+
+    def ask_nicely_policy(self):
+        """
+        Ask client for preference.
+        """
+        cid = int(self.client_id)
+        pref = cid  # Simple mapping
+        self.know_preference[cid] = pref
+        self.client_preference = pref
+
+    def pick_bottle_policy(self):
+        """
+        Pick a bottle based on agent choice.
+        """
+        if self.bottle_in_right_hand:
+            return
+        
+        if not self.is_at_preparation_table():
+            return
+            
+        bottle_id = 1
+        if bottle_id == 0:
+            return
+
+        self.bottle_in_right_hand = True
+        self.picked_bottle = int(bottle_id)
+        for b in self.bottles:
+            if int(b["id"]) == self.picked_bottle:
+                b["distance"] = 0.0
+                b["angle"] = 1.4
+                break
+
+    def prepare_drink_policy(self):
+        """
+        Prepare the drink if holding glass and bottle.
+        """
+        if not self.glass_in_left_hand:
+            return
+        if not self.bottle_in_right_hand:
+            return
+        if self.glass and self.glass["state"]:
+            return
+
+        if self.glass:
+            self.glass["state"] = True
+            self.glass["drink_type"] = float(self.picked_bottle)
+
+    def place_glass_policy(self):
+        """
+        Place glass in appropriate location based on context.
+        - At serving table with prepared drink: place on serving area
+        - At prep table with used glass: return to original position
+        """
+        # Backward-compatible wrapper: delegate to serving or return policies
+        if self.glass and self.glass_in_left_hand and self.glass["state"]:
+            return self.place_glass_serving_policy()
+        return self.return_glass_policy()
+
+    def place_glass_serving_policy(self):
+        """
+        Move to serving area and place the glass there if it is prepared.
+        """
+        if not self.glass_in_left_hand:
+            return
+        if not self.glass:
+            return
+        if not self.glass.get("state", False):
+            return
+
+        self.robot_position = 0.95  # move to serving area
+        self.glass_in_left_hand = False
+        self.glass["distance"] = self.serving_pos["distance"]
+        self.glass["angle"] = self.serving_pos["angle"]
+        self.glass["was_used"] = True
+        self.glass["state"] = False  # client takes the drink
+
+    def return_glass_policy(self):
+        """
+        Move to the return/prep area and place the glass back in its original spot.
+        """
+        if not self.glass_in_left_hand:
+            return
+        if not self.glass:
+            return
+
+        self.robot_position = 0.0  # move back to prep/return area
+        self.glass_in_left_hand = False
+        self.glass["distance"] = self.original_glass_pos["distance"]
+        self.glass["angle"] = self.original_glass_pos["angle"]
+
+    def place_bottle_policy(self):
+        """
+        Place bottle back.
+        """
+        if not self.is_at_preparation_table():
+            return
+        if not self.bottle_in_right_hand:
+            return
+            
+        self.bottle_in_right_hand = False
+        self.picked_bottle = 0
+        for b in self.bottles:
+            distance, angle = self.random_position(self.prep_area)
+            b["distance"] = distance
+            b["angle"] = angle  
+            
+
+    def change_position_policy(self):
+        """
+        Toggle robot position between prep and serving.
+        Restricted: Can only go to serving if holding glass with drink,
+        and can only return to prep if at serving without anything problematic.
+        """
+        if self.is_at_preparation_table():
+            # Only allow moving to serving if holding glass with prepared drink
+            if self.glass_in_left_hand and self.glass and self.glass["state"]:
+                self.robot_position = 0.95
+        elif self.is_at_serving_table():
+            # Allow returning to prep if: not holding glass, OR holding used glass
+            if not self.glass_in_left_hand:
+                self.robot_position = 0.0
+            elif self.glass and self.glass["was_used"]:
+                self.robot_position = 0.0
+
+    def ask_nicely_policy(self):
+        """
+        Ask client for preference.
+        """
+        cid = int(self.client_id)
+        pref = cid  # Simple mapping
+        self.know_preference[cid] = pref
+        self.client_preference = pref
+
+    def get_progress_goal(self):
+        """
+        Calculate reward based on the immediate current state (no accumulated progress).
+        """
+        has_glass = self.glass_in_left_hand
+        has_bottle = self.bottle_in_right_hand
+        
+        glass_state = self.glass["state"] if self.glass else False
+        was_used = self.glass["was_used"] if self.glass else False
+        
+        at_prep = self.is_at_preparation_table()
+        at_serv = self.is_at_serving_table()
+        
+        # Check glass position
+        g_dist = self.glass["distance"] if self.glass else 0.0
+        g_ang = self.glass["angle"] if self.glass else 0.0
+        
+        glass_at_serving = (abs(g_dist - self.serving_pos["distance"]) < 0.1 and 
+                            abs(g_ang - self.serving_pos["angle"]) < 0.1)
+                            
+        glass_at_original = (abs(g_dist - self.original_glass_pos["distance"]) < 0.1 and 
+                             abs(g_ang - self.original_glass_pos["angle"]) < 0.1)
+
+        # Determine current state step
+        current_step = 0.0
+        
+        if glass_at_original and not has_glass and was_used:
+            current_step = 1.0
+        elif at_prep and has_glass and not glass_state and was_used:
+            current_step = 0.9
+        elif has_glass and not glass_state and was_used:
+            current_step = 0.85
+        elif glass_at_serving and not glass_state and not has_glass:
+            current_step = 0.8
+        elif glass_at_serving and glass_state and not has_glass:
+            current_step = 0.6
+        elif at_serv and has_glass and glass_state:
+            current_step = 0.5
+        elif at_prep and has_glass and glass_state:
+            current_step = 0.4
+        elif has_glass and has_bottle and at_prep:
+            current_step = 0.25
+        elif has_glass and at_prep:
+            current_step = 0.15
+        elif has_bottle and at_prep:
+            current_step = 0.1
+        elif at_prep and not has_glass and not has_bottle:
+            current_step = 0.05
+    
+        reward = current_step
+
+        # Zero out reward if the agent repeats the exact same policy consecutively
+        repeated_policy = (
+            self.last_policy_executed is not None and
+            self.prev_policy_executed == self.last_policy_executed
+        )
+
+        if repeated_policy:
+            reward = 0.0
+            # Detect looping patterns (e.g., [pick_glass, place_glass_return, pick_glass, ...])
+            if len(self.policy_sequence) >= 2:
+                # Check if last 2 policies form a repeating pattern
+                recent_pattern = tuple(self.policy_sequence[-2:])
+                if len(self.policy_sequence) >= 4:
+                    prev_pattern = tuple(self.policy_sequence[-4:-2])
+                    if recent_pattern == prev_pattern:
+                        self.sequence_repeat_count += 1
+                        # Penalize based on how many times we've repeated the pattern
+                        penalty = min(0.3 * self.sequence_repeat_count, 1.0)
+                        reward = max(0.0 - penalty, -0.5)
+                    else:
+                        self.sequence_repeat_count = 0
+
+        self.last_step = current_step
+
+        return float(reward)
+
+    def get_serve_the_drink_goal(self):
+        """
+        Calculate serve drink goal reward.
+        """
+        reward = 0.0
+        glass_at_serving = self.glass_is_in_serving_position()
+        glass_at_original = self.glass_is_in_preparation_area()
+                            
+        if glass_at_original and self.glass and self.glass["was_used"]:
+             reward = 1.0
+        
+        return reward
+
+    def get_return_the_glass_goal(self):
+        """
+        Calculate return glass goal reward.
+        """
+        reward = 0.0
+        if not self.glass:
+            return reward
+            
+        g_dist = self.glass["distance"]
+        g_ang = self.glass["angle"]
+        glass_at_original = (abs(g_dist - self.original_glass_pos["distance"]) < 0.1 and 
+                             abs(g_ang - self.original_glass_pos["angle"]) < 0.1)
+                             
+        if glass_at_original and self.glass["was_used"] and not self.glass_in_left_hand:
+            reward = 1.0
+            
+        return reward
+
+    def execute_policy(self, policy_name):
+        """
+        Execute a policy by name.
+        """
+        policy_method = getattr(self, policy_name + "_policy", None)
+        if policy_method and callable(policy_method):
+            self.prev_policy_executed = self.last_policy_executed
+            self.last_policy_executed = policy_name
+            self.policy_sequence.append(policy_name)  # Track policy sequence
+            # Keep only last 10 policies to avoid memory issues
+            if len(self.policy_sequence) > 10:
+                self.policy_sequence.pop(0)
+            policy_method()
+            return True
+        return False
+
+
+class BartenderSimNode(Node):
+    """
+    ROS2 Node wrapper for BartenderSim that handles perceptions and communication.
+    """
+    def __init__(self):
+        """
+        Constructor of the BartenderSimNode class.
+        Initializes ROS communication and wraps the simulator.
+        """
+        super().__init__("BartenderSim")
+        
+        self.ident = None
+        self.base_messages = {}
+        self.perceptions = {}
+        self.sim_publishers = {}
+        self.change_reward_iterations = {}
+
+        self.random_seed = self.declare_parameter('random_seed', value=1000).get_parameter_value().integer_value
+        self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
+        
+        # Create the pure simulator
+        self.simulator = BartenderSim(random_seed=self.random_seed)
+        
+        self.cbgroup_server = MutuallyExclusiveCallbackGroup()
+        self.cbgroup_client = MutuallyExclusiveCallbackGroup()
+
+        self.load_client = ServiceClient(LoadConfig, 'commander/load_experiment')
+        
+        self.agent_bottle_subscription = self.create_subscription(
+            Float32,
+            "cognitive_node/world_model/last_bottle",
+            self.agent_bottle_callback,
+            10
+        )
+
+    def agent_bottle_callback(self, msg):
+        self.simulator.set_agent_bottle_choice(float(msg.data))
+
     def perceive_bottles(self):
         """
-        Update the bottles perceptions.
+        Update the bottles perceptions from simulator state.
         """
         self.perceptions["bottles"].data = []
-        if self.bottles:
-            for b in self.bottles:
+        bottles_state = self.simulator.get_bottles_state()
+        if bottles_state:
+            for b in bottles_state:
                 msg = self.base_messages["bottles"]()
                 msg.distance = float(b["distance"])
                 msg.angle = float(b["angle"])
@@ -132,348 +681,58 @@ class BartenderSim(Node):
 
     def perceive_glass(self):
         """
-        Update the glass perceptions.
+        Update the glass perceptions from simulator state.
         """
         self.perceptions["glass"].data = []
         msg = self.base_messages["glass"]()
-        if self.glass:
-            msg.distance = float(self.glass["distance"])
-            msg.angle = float(self.glass["angle"])
-            msg.state = bool(self.glass["state"])
-            msg.drink_type = float(self.glass["drink_type"])
-            msg.was_used = bool(self.glass["was_used"])
+        glass_state = self.simulator.get_glass_state()
+        msg.distance = float(glass_state["distance"])
+        msg.angle = float(glass_state["angle"])
+        msg.state = bool(glass_state["state"])
+        msg.drink_type = float(glass_state["drink_type"])
+        msg.was_used = bool(glass_state["was_used"])
         self.perceptions["glass"].data.append(msg)
 
-    def random_perceptions(self):
+    def update_perceptions_from_simulator(self):
         """
-        Generate random perceptions when the world is reset.
+        Update all perceptions from simulator state.
         """
-        self.picked_bottle = 0
-        self.agent_bottle_choice = None
-        
-        # Generate environment
-        self.generate_bottles()
-        self.generate_glass()
-        
-        # Update perceptions
         self.perceive_bottles()
         self.perceive_glass()
-
-        step = random.choice(self.steps)
-        self.get_logger().info(f"Randomly selected step: {step}")
-
-        if step == "on_prep":
-            # Robot at prep, no glass, no bottle
-            self.perceptions["robot_position"].data = 0.0
-            self.perceptions["glass_in_left_hand"].data = False
-            self.perceptions["bottle_in_right_hand"].data = False
-
-        elif step == "on_prep_with_glass":
-            self.perceptions["robot_position"].data = 0.0
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["bottle_in_right_hand"].data = False
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-            self.once = False
-
-        elif step == "on_prep_with_bottle":
-            self.perceptions["robot_position"].data = 0.0
-            self.perceptions["glass_in_left_hand"].data = False
-            self.perceptions["bottle_in_right_hand"].data = True
-            self.once = False
-
-        elif step == "on_prep_with_both":
-            self.perceptions["robot_position"].data = 0.0
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["bottle_in_right_hand"].data = True
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-            self.once = False
         
-        elif step == "on_prep_with_glass_served":
-            self.perceptions["robot_position"].data = 0.0
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["bottle_in_right_hand"].data = False
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-            self.perceptions["glass"].data[0].state = True
-            self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
-
-        elif step == "holding_glass_at_serv":
-            self.perceptions["robot_position"].data = 0.95
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["bottle_in_right_hand"].data = False
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-            self.perceptions["glass"].data[0].state = True
-            self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
-
-        elif step == "holding_both_at_serv":
-            self.perceptions["robot_position"].data = 0.95
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["bottle_in_right_hand"].data = True
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-            self.perceptions["glass"].data[0].state = True
-            self.perceptions["glass"].data[0].drink_type = 1.0
-            self.once = False
-    
+        self.perceptions["robot_position"].data = float(self.simulator.robot_position)
+        self.perceptions["glass_in_left_hand"].data = bool(self.simulator.glass_in_left_hand)
+        self.perceptions["bottle_in_right_hand"].data = bool(self.simulator.bottle_in_right_hand)
         
         # Client
         self.perceptions["client"].data = []
-        self.perceptions["client"].data.append(self.base_messages["client"]())
-        cid = 1
-        self.perceptions["client"].data[0].id = cid
-        if cid in self.know_preference:
-            self.perceptions["client"].data[0].preference = 1
-        else:
-            self.perceptions["client"].data[0].preference = 0
+        client_msg = self.base_messages["client"]()
+        client_msg.id = int(self.simulator.client_id)
+        client_msg.preference = int(self.simulator.client_preference)
+        self.perceptions["client"].data.append(client_msg)
 
-        self.update_reward_sensor()
-    
-    def is_at_preparation_table(self):
-        return bool(self.perceptions["robot_position"].data) < 0.2
-
-    def is_at_serving_table(self):
-        return bool(self.perceptions["robot_position"].data) >= 0.8
-
-    def glass_is_in_serving_position(self):
-        g = self.perceptions["glass"].data[0]
-        if float(g.distance) < 0 or float(g.angle) < 0:
-            return False
-        # rounded equality check
-        gd = round(float(g.distance), 1)
-        ga = round(float(g.angle), 1)
-        sd = round(float(self.serving_pos["distance"]), 2)
-        sa = round(float(self.serving_pos["angle"]), 2)
-        return (gd == sd) and (abs(ga) == abs(sa))
-
-    def glass_is_in_preparation_area(self) :
-        g = self.perceptions["glass"].data[0]
-        d = float(g.distance)
-        a = float(g.angle)
-        # Convert polar (d, a) back to Cartesian (x, y) assuming a = arctan2(x, y)
-        x = d * np.sin(a)
-        y = d * np.cos(a)
-        area = self.prep_area
-        return (area["x_min"] <= x <= area["x_max"]) and (area["y_min"] <= y <= area["y_max"])
-
-
-    def pick_glass_policy(self):
-        self.perceptions["glass"].data[0].distance = 0.0
-        self.perceptions["glass"].data[0].angle = 0.0
-        if self.perceptions["glass_in_left_hand"].data:
-            return
-        
-        if self.perceptions["robot_position"].data < 0.2:
-            self.perceptions["glass_in_left_hand"].data = True
-            self.perceptions["glass"].data[0].distance = 0.0
-            self.perceptions["glass"].data[0].angle = 0.0
-        
-
-    def pick_bottle_policy(self):
-        """
-        Pick a bottle based on agent choice.
-        """
-        self.get_logger().info(f"Agent bottle choice: {self.agent_bottle_choice}")
-        if self.perceptions["bottle_in_right_hand"].data:
-            return
-        
-        if not self.is_at_preparation_table():
-            return
-            
-        bottle_id = 1
-        if bottle_id == 0:
-            return
-
-        self.perceptions["bottle_in_right_hand"].data = True
-        self.picked_bottle = int(bottle_id)
-
-    def prepare_drink_policy(self):
-        """
-        Prepare the drink if holding glass and bottle.
-        """
-        if not self.perceptions["glass_in_left_hand"].data:
-            return
-        if not self.perceptions["bottle_in_right_hand"].data:
-            return
-        if self.perceptions["glass"].data[0].state:
-            return
-
-        self.perceptions["glass"].data[0].state = True
-        self.perceptions["glass"].data[0].drink_type = float(self.picked_bottle)
-        if self.glass:
-            self.glass["state"] = True
-            self.glass["drink_type"] = float(self.picked_bottle)
-
-    def place_glass_serving_policy(self):
-        """
-        Place glass on serving table.
-        """
-        if not self.is_at_serving_table():
-            return
-        if not self.perceptions["glass_in_left_hand"].data:
-            return
-        
-        self.perceptions["glass_in_left_hand"].data = False
-        self.perceptions["glass"].data[0].distance = self.serving_pos["distance"]
-        self.perceptions["glass"].data[0].angle = self.serving_pos["angle"]
-        self.perceptions["glass"].data[0].was_used = True
-        self.perceptions["glass"].data[0].state = False  # After placing, glass is empty (client will drink)
-
-    def place_glass_return_policy(self):
-        """
-        Return glass to preparation table.
-        """
-        if not self.is_at_preparation_table():
-            return
-        if not self.perceptions["glass_in_left_hand"].data:
-            return
-            
-        self.perceptions["glass_in_left_hand"].data = False
-        self.glass["distance"] = self.original_glass_pos["distance"]
-        self.glass["angle"] = self.original_glass_pos["angle"]
-        self.perceptions["glass"].data[0].distance = self.original_glass_pos["distance"]
-        self.perceptions["glass"].data[0].angle = self.original_glass_pos["angle"]
-
-    def place_bottle_policy(self):
-        """
-        Place bottle back.
-        """
-        if not self.is_at_preparation_table():
-            return
-        if not self.perceptions["bottle_in_right_hand"].data:
-            return
-            
-        self.perceptions["bottle_in_right_hand"].data = False
-        self.picked_bottle = 0
-
-    def change_position_policy(self):
-        """
-        Toggle robot position between prep and serving.
-        """
-        if self.is_at_preparation_table():
-                self.perceptions["robot_position"].data = 0.95
-        elif self.is_at_serving_table():
-            self.perceptions["robot_position"].data = 0.0
-        else:
-            self.perceptions["robot_position"].data = 0.0
-            
-
-    def ask_nicely_policy(self):
-        """
-        Ask client for preference.
-        """
-        cid = int(self.perceptions["client"].data[0].id)
-        # In a real sim we would look up the client's preference.
-        # Here we generate it or retrieve it.
-        # For simplicity, let's say preference is same as ID for now or random
-        # But we need to be consistent.
-        # In random_perceptions we set preference to 0 if unknown.
-        # We need a source of truth for clients.
-        # Let's just say preference = cid for simplicity in this "fruit shop style" rewrite
-        # unless we want to keep the "bar_clients" list.
-        # I'll use a simple mapping.
-        pref = cid # Simple mapping
-        self.know_preference[cid] = pref
-        self.perceptions["client"].data[0].preference = pref
-
-    def reward_progress_goal(self):
-        """
-        Calculate progress reward.
-        """
-        has_glass = self.perceptions["glass_in_left_hand"].data
-        has_bottle = self.perceptions["bottle_in_right_hand"].data
-        
-        glass_state = self.perceptions["glass"].data[0].state
-        was_used = self.perceptions["glass"].data[0].was_used
-        
-        at_prep = self.is_at_preparation_table()
-        at_serv = self.is_at_serving_table()
-        
-        # Check glass position
-        g_dist = self.perceptions["glass"].data[0].distance
-        g_ang = self.perceptions["glass"].data[0].angle
-        
-        glass_at_serving = (abs(g_dist - self.serving_pos["distance"]) < 0.1 and 
-                            abs(g_ang - self.serving_pos["angle"]) < 0.1)
-                            
-        glass_at_original = (abs(g_dist - self.original_glass_pos["distance"]) < 0.1 and 
-                             abs(g_ang - self.original_glass_pos["angle"]) < 0.1)
-
-        step = 0.0
-        
-        if glass_at_original and not has_glass and was_used:
-            step = 1.0
-        elif at_prep and has_glass and not glass_state and was_used:
-            step = 0.9
-        elif has_glass and not glass_state and was_used:
-            step = 0.85
-        elif glass_at_serving and not glass_state and not has_glass and was_used:
-            step = 0.8 # Client drank
-        elif glass_at_serving and glass_state and not has_glass:
-            step = 0.6
-        elif at_serv and has_glass and glass_state and self.once:
-            step = 0.5
-            self.once = False
-        elif at_prep and has_glass and glass_state:
-            step = 0.4
-            self.once = True
-        elif has_glass and has_bottle and at_prep:
-            step = 0.25
-        elif has_glass and at_prep:
-            step = 0.15
-        elif has_bottle and at_prep:
-            step = 0.1
-        elif at_prep and not has_glass and not has_bottle and self.once:
-            step = 0.05
-            self.once = False
-            
-        self.perceptions["progress_goal"].data = float(step)
-        self.get_logger().info(f"Progress goal reward: {step}")
-
-    def reward_serve_the_drink_goal(self):
-        reward = 0.0
-        
-        g_dist = self.perceptions["glass"].data[0].distance
-        g_ang = self.perceptions["glass"].data[0].angle
-        glass_at_serving = self.glass_is_in_serving_position()
-                            
-        if glass_at_serving and self.perceptions["glass"].data[0].was_used:
-             reward = 1.0
-        
-        self.perceptions["serve_the_drink_goal"].data = reward
-
-    def reward_return_the_glass_goal(self):
-        reward = 0.0
-        g_dist = self.perceptions["glass"].data[0].distance
-        g_ang = self.perceptions["glass"].data[0].angle
-        glass_at_original = (abs(g_dist - self.original_glass_pos["distance"]) < 0.1 and 
-                             abs(g_ang - self.original_glass_pos["angle"]) < 0.1)
-                             
-        if glass_at_original and self.perceptions["glass"].data[0].was_used and not self.perceptions["glass_in_left_hand"].data:
-            reward = 1.0
-            
-        self.perceptions["return_the_glass_goal"].data = reward
-
-    def reset_world(self, data):
+    def reset_world(self, data=None):
         """
         Reset the world to a new state.
         """
         self.get_logger().info("Resetting world...")
-        self.random_perceptions()
+        self.simulator.reset_world()
+        self.update_perceptions_from_simulator()
+        self.update_reward_sensor()
         self.publish_perceptions()
 
     def update_reward_sensor(self):
         """
-        Update goal sensors' values.
+        Update goal sensors' values from simulator.
         """
-        for sensor in self.perceptions:
-            reward_method = getattr(self, "reward_" + sensor, None)
-            if callable(reward_method):
-                reward_method()
+        if "progress_goal" in self.perceptions:
+            progress = self.simulator.get_progress_goal()
+            self.perceptions["progress_goal"].data = progress
+            self.get_logger().info(f"Progress reward: {progress}")
+        if "serve_the_drink_goal" in self.perceptions:
+            self.perceptions["serve_the_drink_goal"].data = self.simulator.get_serve_the_drink_goal()
+        if "return_the_glass_goal" in self.perceptions:
+            self.perceptions["return_the_glass_goal"].data = self.simulator.get_return_the_glass_goal()
     
     def publish_perceptions(self):
         """
@@ -488,15 +747,15 @@ class BartenderSim(Node):
         Callback for the world reset service.
         """
         self.reset_world(request)
-        response.success=True
+        response.success = True
         return response
 
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received.
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
-        self.iteration = data.iteration
+        self.simulator.iteration = data.iteration
         self.update_reward_sensor()
         if data.command == "reset_world":
             self.reset_world(data)
@@ -509,20 +768,19 @@ class BartenderSim(Node):
         Execute a policy and publish new perceptions.
         """
         self.get_logger().info("Executing policy " + str(request.policy))
-        self.get_logger().info(f"ITERATION: {self.iteration}")
+        self.get_logger().info(f"ITERATION: {self.simulator.iteration}")
         
-        # Pre-perception update (in case things changed externally, though here it's static)
-        self.perceive_bottles()
-        self.perceive_glass()
+        # Pre-perception update
+        self.update_perceptions_from_simulator()
         
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
         self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
         
-        getattr(self, request.policy + "_policy")()
+        # Execute policy in simulator
+        self.simulator.execute_policy(request.policy)
         
         # Post-perception update
-        self.perceive_bottles()
-        self.perceive_glass()
+        self.update_perceptions_from_simulator()
         
         self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
         self.update_reward_sensor()
@@ -581,25 +839,19 @@ class BartenderSim(Node):
 
         if service_world_reset:
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
-            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
 
     def load_experiment_file_in_commander(self):
         """
         Load the configuration file in the commander node.
         """
-        loaded = self.load_client.send_request(file = self.config_file)
+        loaded = self.load_client.send_request(file=self.config_file)
         return loaded
 
     def load_configuration(self):
         """
         Load the configuration file and setup the simulator.
         """
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
-
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")
             rclpy.shutdown()
@@ -619,9 +871,11 @@ class BartenderSim(Node):
         
         self.load_experiment_file_in_commander()
 
+
+
 def main(args=None):
     rclpy.init(args=args)
-    sim = BartenderSim()
+    sim = BartenderSimNode()
     sim.load_configuration()
 
     try:
@@ -633,3 +887,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+ 

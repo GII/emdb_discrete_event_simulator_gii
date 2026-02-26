@@ -26,8 +26,10 @@ class BartenderSim:
         self.random_seed = random_seed
         
         # Simulation steps
-        self.steps = ["on_prep", "on_prep_with_glass", "on_prep_with_bottle",
-                      "on_prep_with_both","at_prep_with_used_glass", "at_serv_with_used_glass"]
+        # self.steps = ["on_prep", "on_prep_with_glass", "on_prep_with_bottle",
+        #               "on_prep_with_both","at_prep_with_used_glass", "at_serv_with_used_glass"]
+        
+        self.steps = ["on_prep"]
 
         self.bottles = []
         self.glass = None
@@ -286,11 +288,6 @@ class BartenderSim:
         """
         Pick a bottle based on agent choice.
         """
-        if self.bottle_in_right_hand:
-            return
-        
-        if not self.is_at_preparation_table():
-            return
             
         bottle_id = 1
         if bottle_id == 0:

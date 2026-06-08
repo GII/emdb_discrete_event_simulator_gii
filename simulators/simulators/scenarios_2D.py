@@ -2,7 +2,9 @@ import math
 import numpy as np
 from enum import Enum
 import matplotlib
-matplotlib.use('TkAgg')
+import os
+if not os.environ.get('MPLBACKEND'):
+    matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
@@ -423,7 +425,7 @@ class Sim(object):
             plt.rcParams['toolbar'] = 'None'  # Disable toolbar
             plt.ioff()  # Turn off interactive mode
             self.fig = plt.figure()
-            self.fig.canvas.set_window_title('Simulator')
+            self.fig.canvas.manager.set_window_title('Simulator')
             self.ax = plt.axes(xlim=self.x_plt_bounds, ylim=self.y_plt_bounds)
             self.ax.axes.get_xaxis().set_visible(False)
             self.ax.axes.get_yaxis().set_visible(False)

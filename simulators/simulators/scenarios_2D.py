@@ -4,7 +4,7 @@ from enum import Enum
 import matplotlib
 import os
 if not os.environ.get('MPLBACKEND'):
-    matplotlib.use('TkAgg')
+    matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes

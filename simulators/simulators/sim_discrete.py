@@ -61,6 +61,7 @@ class LTMSim(Node):
         self.last_reset_iteration = 0
         self.world = None
         self.base_messages = {}
+        self.service_world_reset = True
         self.perceptions = {}
         self.sim_publishers = {}
         self.catched_object = None
@@ -938,7 +939,7 @@ class LTMSim(Node):
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
-        if data.command == "reset_world":
+        if data.command == "reset_world" and not self.service_world_reset:
             self.reset_world(data)
         elif data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
@@ -1037,9 +1038,10 @@ class LTMSim(Node):
             self.get_logger().info("Creating perception publisher timer... ")
             self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
         if service_world_reset:
+            self.service_world_reset = True
             classname= simulation["executed_policy_msg"]
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
-            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
             
 
     def setup_perceptions(self, perceptions):

@@ -2,7 +2,7 @@ import math
 import numpy as np
 from enum import Enum
 import matplotlib
-matplotlib.use('TkAgg')
+
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
@@ -420,6 +420,7 @@ class Sim(object):
 
         # Generate Plots
         if self.visualize:
+            matplotlib.use('TkAgg')
             plt.rcParams['toolbar'] = 'None'  # Disable toolbar
             plt.ioff()  # Turn off interactive mode
             self.fig = plt.figure()

@@ -148,8 +148,11 @@ class BartenderSim:
 
     def generate_glass(self):
         """Generate a glass at the origin."""
-        self.glass = dict(distance=0.0, angle=0.0, state=False, drink_type=0.0, was_used=False)
-        self.original_glass_pos = {"distance": 0.0, "angle": 0.0}
+        # Place the glass at a random position inside the preparation area
+        # so episodes vary spatially like the bottles.
+        dist, ang = self.random_position(self.prep_area)
+        self.glass = dict(distance=dist, angle=ang, state=False, drink_type=0.0, was_used=False)
+        self.original_glass_pos = {"distance": dist, "angle": ang}
 
     # ------------------------------------------------------------------ #
     # State accessors
@@ -161,6 +164,29 @@ class BartenderSim:
             {"distance": float(b["distance"]), "angle": float(b["angle"]), "id": int(b["id"])}
             for b in self.bottles
         ] if self.bottles else []
+
+    def get_selected_bottle_state(self):
+        """Return the selected bottle state, preferring the agent choice when available."""
+        bottle_id = self.agent_bottle_choice
+        if bottle_id is None and self.client_preference > 0:
+            bottle_id = float(self.client_preference)
+
+        if bottle_id is None:
+            return None
+
+        try:
+            selected_id = int(round(float(bottle_id)))
+        except (TypeError, ValueError):
+            return None
+
+        for bottle in self.bottles:
+            if int(bottle["id"]) == selected_id:
+                return {
+                    "distance": float(bottle["distance"]),
+                    "angle": float(bottle["angle"]),
+                    "id": selected_id,
+                }
+        return None
 
     def get_glass_state(self):
         """Get the current state of the glass."""
@@ -223,7 +249,7 @@ class BartenderSim:
         self.glass_in_left_hand = False
         self.bottle_in_right_hand = False
 
-        step = random.choice(self.steps)
+        step = self.rng.choice(self.steps)
 
         if step == "on_prep":
             pass  # defaults already set
@@ -259,7 +285,9 @@ class BartenderSim:
             self.bottle_in_right_hand = bool(self.rng.integers(0, 2))
             if self.bottle_in_right_hand:
                 self.picked_bottle = int(self.rng.choice(self._get_valid_bottle_ids()))
-            self.glass.update({"distance": 0.8, "angle": 0.0, "state": False, "was_used": True})
+            # place used glass at a random serving position
+            dist, ang = self.random_position(self.serv_area)
+            self.glass.update({"distance": dist, "angle": ang, "state": False, "was_used": True})
 
         elif step == "at_serv_with_correct_drink_and_bottle":
             self.robot_position = 0.95
@@ -267,8 +295,10 @@ class BartenderSim:
             self.bottle_in_right_hand = bool(self.rng.integers(0, 2))
             if self.bottle_in_right_hand:
                 self.picked_bottle = int(self.client_preference) if self.client_preference > 0 else 1
+            # place glass at a random serving position (still considered in-hand)
+            dist, ang = self.random_position(self.serv_area)
             self.glass.update({
-                "distance": 0.8, "angle": 0.0, "state": True,
+                "distance": dist, "angle": ang, "state": True,
                 "drink_type": float(self.client_preference), "was_used": False,
             })
 
@@ -282,8 +312,10 @@ class BartenderSim:
         elif step == "at_serv_with_correct_drink":
             self.robot_position = 0.95
             self.glass_in_left_hand = True
+            # place glass at a random serving position (still considered in-hand)
+            dist, ang = self.random_position(self.serv_area)
             self.glass.update({
-                "distance": 0.8, "angle": 0.0, "state": True,
+                "distance": dist, "angle": ang, "state": True,
                 "drink_type": float(self.client_preference), "was_used": False,
             })
 
@@ -633,6 +665,29 @@ class BartenderSimNode(Node):
         self.perceptions["glass_in_left_hand"].data = bool(self.simulator.glass_in_left_hand)
         self.perceptions["bottle_in_right_hand"].data = bool(self.simulator.bottle_in_right_hand)
 
+        selected_bottle = self.simulator.get_selected_bottle_state()
+        if "last_bottle" in self.perceptions:
+            perception = self.perceptions["last_bottle"]
+            if hasattr(perception, "id"):
+                if selected_bottle is not None:
+                    perception.id = int(selected_bottle["id"])
+                    perception.distance = float(selected_bottle["distance"])
+                    perception.angle = float(selected_bottle["angle"])
+                    # Match the simulator's polar convention: angle = atan2(x, y)
+                    perception.x = float(selected_bottle["distance"] * math.sin(selected_bottle["angle"]))
+                    perception.y = float(selected_bottle["distance"] * math.cos(selected_bottle["angle"]))
+                else:
+                    perception.id = -1
+                    perception.distance = -1.0
+                    perception.angle = -1.0
+                    perception.x = -1.0
+                    perception.y = -1.0
+            else:
+                perception.data = int(selected_bottle["id"] if selected_bottle else -1)
+
+        if "last_bottle_position" in self.perceptions:
+            self.perceptions["last_bottle_position"].data = float(selected_bottle["distance"] if selected_bottle else -1.0)
+
         # --- Stage perception ---
         if "stage" in self.perceptions:
             # Determinar la etapa actual según el número de iteración
@@ -748,8 +803,21 @@ class BartenderSimNode(Node):
 
     def publish_perceptions(self):
         for ident, publisher in self.sim_publishers.items():
-            self.get_logger().debug(f"Publishing {ident} = {self.perceptions[ident].data}")
-            publisher.publish(self.perceptions[ident])
+            perception = self.perceptions[ident]
+            if hasattr(perception, "data"):
+                debug_value = perception.data
+            elif hasattr(perception, "id"):
+                debug_value = {
+                    "id": perception.id,
+                    "distance": perception.distance,
+                    "angle": perception.angle,
+                    "x": perception.x,
+                    "y": perception.y,
+                }
+            else:
+                debug_value = perception
+            self.get_logger().debug(f"Publishing {ident} = {debug_value}")
+            publisher.publish(perception)
 
     # ------------------------------------------------------------------ #
     # ROS callbacks
@@ -817,6 +885,14 @@ class BartenderSimNode(Node):
             if "List" in classname:
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            elif classname.endswith("BottleMsg"):
+                # BottleMsg is a structured message, not a scalar wrapper.
+                # Initialize all known fields so later updates can safely assign them.
+                self.perceptions[sid].id = -1
+                self.perceptions[sid].distance = -1.0
+                self.perceptions[sid].angle = -1.0
+                self.perceptions[sid].x = -1.0
+                self.perceptions[sid].y = -1.0
             elif "Float" in classname:
                 self.perceptions[sid].data = 0.0
             else:

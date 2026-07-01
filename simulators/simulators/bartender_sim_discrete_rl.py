@@ -1,6 +1,5 @@
 import os
 import math
-import random
 
 import numpy
 import numpy as np
@@ -13,7 +12,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from std_msgs.msg import Float32
 from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 
 
 class BartenderSim:
@@ -47,9 +46,9 @@ class BartenderSim:
     ]
     POLICY_TO_INDEX = {policy_name: idx for idx, policy_name in enumerate(POLICIES)}
 
-    def __init__(self, random_seed=1000, n_bottles=3):
-        self.rng = numpy.random.default_rng(random_seed if random_seed else None)
-        self.random_seed = random_seed
+    def __init__(self, random_seed=0, n_bottles=3):
+        self.random_seed = resolve_seed(random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
         self.n_bottles = n_bottles
 
         self.steps = [
@@ -606,7 +605,7 @@ class BartenderSimNode(Node):
         self.change_reward_iterations = {}
 
         self.random_seed = self.declare_parameter(
-            'random_seed', value=1000
+            'random_seed', value=0
         ).get_parameter_value().integer_value
 
         self.config_file = self.declare_parameter(
@@ -615,6 +614,8 @@ class BartenderSimNode(Node):
         ).get_parameter_value().string_value
 
         self.simulator = BartenderSim(random_seed=self.random_seed)
+        self.random_seed = self.simulator.random_seed
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         self.cbgroup_server = MutuallyExclusiveCallbackGroup()
         self.cbgroup_client = MutuallyExclusiveCallbackGroup()

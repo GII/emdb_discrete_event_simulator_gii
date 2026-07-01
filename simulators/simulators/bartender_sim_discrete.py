@@ -9,15 +9,14 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from std_msgs.msg import Float32
 from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 import numpy as np
-import random
 
 class BartenderSim:
     """
     BartenderSim simulator class - Pure simulation logic without ROS communication.
     """
-    def __init__(self, random_seed=1000):
+    def __init__(self, random_seed=0):
         """
         Constructor of the BartenderSim simulator class.
         Initializes the simulator with state tracking only.
@@ -55,11 +54,9 @@ class BartenderSim:
         self.policy_sequence = []  # Track sequence of policies for detecting loops
         self.sequence_repeat_count = 0  # Count how many times a pattern repeats
         
-        # Initialize RNG
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-        else:
-            self.rng = numpy.random.default_rng()
+        # Initialize RNG (0/None -> random time-based seed)
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
 
     def set_agent_bottle_choice(self, bottle_id):
         """Set the agent's bottle choice."""
@@ -144,7 +141,7 @@ class BartenderSim:
         self.generate_bottles()
         self.generate_glass()
 
-        step = random.choice(self.steps)
+        step = self.rng.choice(self.steps)
 
         if step == "on_prep":
             # Robot at prep, no glass, no bottle
@@ -641,11 +638,13 @@ class BartenderSimNode(Node):
         self.sim_publishers = {}
         self.change_reward_iterations = {}
 
-        self.random_seed = self.declare_parameter('random_seed', value=1000).get_parameter_value().integer_value
+        self.random_seed = self.declare_parameter('random_seed', value=0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
         
         # Create the pure simulator
         self.simulator = BartenderSim(random_seed=self.random_seed)
+        self.random_seed = self.simulator.random_seed
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
         
         self.cbgroup_server = MutuallyExclusiveCallbackGroup()
         self.cbgroup_client = MutuallyExclusiveCallbackGroup()

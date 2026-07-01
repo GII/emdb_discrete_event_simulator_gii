@@ -14,7 +14,7 @@ from core.service_client import ServiceClient
 
 from core_interfaces.srv import LoadConfig
 from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWithTwoHands, ObjectTooFar
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 
 class World(Enum):
     """
@@ -1085,11 +1085,9 @@ class LTMSim(Node):
                 self.setup_perceptions(config["SimulatedBaxter"]["Perceptions"])
                 # Be ware, we can not subscribe to control channel before creating all sensor publishers.
                 self.setup_control_channel(config["Control"])
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
         
         self.load_experiment_file_in_commander()
 

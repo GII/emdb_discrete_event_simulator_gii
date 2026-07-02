@@ -73,7 +73,12 @@ class BartenderSim:
 
         self.prep_area = {"x_min": 0.0, "x_max": 0.6, "y_min": 0.9, "y_max": 1.1}
         self.serv_area = {"x_min": 0.4, "x_max": 0.7, "y_min": 0.5, "y_max": 0.9}
-        self.serving_pos = {"distance": 0.8, "angle": 0.0}
+        serv_x = (self.serv_area["x_min"] + self.serv_area["x_max"]) / 2.0
+        serv_y = (self.serv_area["y_min"] + self.serv_area["y_max"]) / 2.0
+        self.serving_pos = {
+            "distance": float(numpy.linalg.norm([serv_x, serv_y])),
+            "angle": float(numpy.arctan2(serv_x, serv_y)),
+        }
 
         self.robot_position = 0.0
         self.glass_in_left_hand = False
@@ -211,12 +216,30 @@ class BartenderSim:
 
     def is_in_transit(self):
         return not self.is_at_preparation_table() and not self.is_at_serving_table()
+    
+    def _polar_to_xy(self, distance, angle):
+         """        
+         Convert simulator polar coordinates back to Cartesian coordinates.
+         Uses the simulator convention angle = atan2(x, y).
+         """
+         x = float(distance) * math.sin(float(angle))
+         y = float(distance) * math.cos(float(angle))
+         return x, y
+
+    def _is_point_in_area(self, distance, angle, area):
+        """Check whether a polar point lies inside a rectangular area in Cartesian space."""
+        x, y = self._polar_to_xy(distance, angle)
+        return (
+           area["x_min"] <= x <= area["x_max"] and
+            area["y_min"] <= y <= area["y_max"]
+        )
+
 
     def glass_is_in_serving_position(self):
-        return bool(self.glass) and self.glass["distance"] >= 0.7
+         return bool(self.glass) and self._is_point_in_area(self.glass["distance"], self.glass["angle"], self.serv_area)
 
     def glass_is_in_preparation_area(self):
-        return bool(self.glass) and self.glass["distance"] < 0.2
+        return bool(self.glass) and self._is_point_in_area(self.glass["distance"], self.glass["angle"], self.prep_area)
 
     # ------------------------------------------------------------------ #
     # Reset

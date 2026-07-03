@@ -8,7 +8,7 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 
 class BartenderSim(Node):
     """
@@ -98,7 +98,7 @@ class BartenderSim(Node):
         Generate clients with random bottles preferences.
         """
         self.get_logger().info("Generating clients...")
-        ids = numpy.random.choice(3, size=3, replace=False)
+        ids = self.rng.choice(3, size=3, replace=False)
         ident = 0
         for id in ids:
             client = dict(
@@ -268,7 +268,7 @@ class BartenderSim(Node):
         Generate random perceptions when the world is reset.
         """
         self.catched_fruit = None
-        self.perceptions["client"].data = numpy.random.randint(0, 3)
+        self.perceptions["client"].data = int(self.rng.integers(0, 3))
         self.perceptions["bottles"].data = []
         self.perceptions["bottles"].data.append(self.base_messages["bottles"]())
 
@@ -759,11 +759,9 @@ class BartenderSim(Node):
         It is configured the random number generator, the stages of the experiment,
         the perceptions, and the control channel.
         """
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")

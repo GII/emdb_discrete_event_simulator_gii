@@ -9,7 +9,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
 
 from core.service_client import ServiceClient
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 from core_interfaces.srv import LoadConfig
 
 
@@ -634,11 +634,9 @@ class FruitServeSim(Node):
         return self.load_client.send_request(file=self.config_file)
 
     def load_configuration(self):
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")

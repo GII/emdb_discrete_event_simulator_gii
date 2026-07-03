@@ -8,7 +8,7 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname, EncodableDecodableEnum, actuation_msg_to_dict
+from core.utils import class_from_classname, EncodableDecodableEnum, actuation_msg_to_dict, resolve_seed
 
 class PumpObjects(EncodableDecodableEnum):
     """
@@ -422,11 +422,9 @@ class PumpPanelSim(Node):
         It is configured the random number generator, the stages of the experiment,
         the perceptions, and the control channel.
         """
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")

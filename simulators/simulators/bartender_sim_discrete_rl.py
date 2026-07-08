@@ -43,6 +43,7 @@ class BartenderSim:
         "change_position",
         "prepare_drink",
         "ask_nicely",
+        "shake_glass",
     ]
     POLICY_TO_INDEX = {policy_name: idx for idx, policy_name in enumerate(POLICIES)}
 
@@ -70,6 +71,7 @@ class BartenderSim:
         self.picked_bottle = 0
         self.agent_bottle_choice = None
         self.know_preference = {}
+        self._served_shake_latch = False
 
         self.prep_area = {"x_min": 0.0, "x_max": 0.6, "y_min": 0.9, "y_max": 1.1}
         self.serv_area = {"x_min": 0.4, "x_max": 0.7, "y_min": 0.5, "y_max": 0.9}
@@ -119,7 +121,7 @@ class BartenderSim:
             return False
         if self.client_preference <= 0:
             return False
-        return int(self.glass["drink_type"]) == int(self.client_preference)
+        return int(self.glass["drink_type"]) == int(self.client_preference) and (self.client_likes_shake == self.glass["is_shaken"])
 
     def is_client_preference_known(self):
         """Whether client preference is known to the agent in the current episode."""
@@ -155,7 +157,8 @@ class BartenderSim:
         # Place the glass at a random position inside the preparation area
         # so episodes vary spatially like the bottles.
         dist, ang = self.random_position(self.prep_area)
-        self.glass = dict(distance=dist, angle=ang, state=False, drink_type=0.0, was_used=False)
+        self.glass = dict(distance=dist, angle=ang, state=False, drink_type=0.0, was_used=False, is_shaken=False)
+
         self.original_glass_pos = {"distance": dist, "angle": ang}
 
     # ------------------------------------------------------------------ #
@@ -195,13 +198,14 @@ class BartenderSim:
     def get_glass_state(self):
         """Get the current state of the glass."""
         if not self.glass:
-            return {"distance": 0.0, "angle": 0.0, "state": False, "drink_type": 0.0, "was_used": False}
+            return {"distance": 0.0, "angle": 0.0, "state": False, "drink_type": 0.0, "was_used": False, "is_shaken": False}
         return {
             "distance": float(self.glass["distance"]),
             "angle": float(self.glass["angle"]),
             "state": bool(self.glass["state"]),
             "drink_type": float(self.glass["drink_type"]),
             "was_used": bool(self.glass["was_used"]),
+            "is_shaken": bool(self.glass["is_shaken"]),
         }
 
     # ------------------------------------------------------------------ #
@@ -257,6 +261,7 @@ class BartenderSim:
         self.correct_drink_served = False
         self.serve_reward_consumed = False
         self.return_reward_consumed = False
+        self._served_shake_latch = False
 
         self.generate_bottles()
         self.generate_glass()
@@ -265,6 +270,7 @@ class BartenderSim:
         cid = int(self.rng.integers(1, 4))
         self.client_id = cid
         self.client_preference = self.know_preference.get(cid, 0)
+        self.client_likes_shake = bool(self.rng.integers(0, 2))
 
         # Default robot state
         self.robot_position = 0.0
@@ -290,6 +296,7 @@ class BartenderSim:
                 "distance": 0.0, "angle": 0.0, "state": True,
                 "drink_type": float(self._get_wrong_drink_type(self.client_preference)),
                 "was_used": False,
+                "is_shaken": False,
             })
 
         elif step == "holding_wrong_drink_at_serv":
@@ -299,6 +306,7 @@ class BartenderSim:
                 "distance": 0.0, "angle": 0.0, "state": True,
                 "drink_type": float(self._get_wrong_drink_type(self.client_preference)),
                 "was_used": False,
+                "is_shaken": False,
             })
 
         elif step == "at_serv_with_used_glass":
@@ -309,7 +317,7 @@ class BartenderSim:
                 self.picked_bottle = int(self.rng.choice(self._get_valid_bottle_ids()))
             # place used glass at a random serving position
             dist, ang = self.random_position(self.serv_area)
-            self.glass.update({"distance": dist, "angle": ang, "state": False, "was_used": True})
+            self.glass.update({"distance": dist, "angle": ang, "state": False, "was_used": True, "is_shaken": False})
 
         elif step == "at_serv_with_correct_drink_and_bottle":
             self.robot_position = 0.95
@@ -321,14 +329,14 @@ class BartenderSim:
             dist, ang = self.random_position(self.serv_area)
             self.glass.update({
                 "distance": dist, "angle": ang, "state": True,
-                "drink_type": float(self.client_preference), "was_used": False,
+                "drink_type": float(self.client_preference), "was_used": False, "is_shaken": False,
             })
 
         elif step == "at_prep_with_correct_drink_glass":
             self.glass_in_left_hand = True
             self.glass.update({
                 "distance": 0.0, "angle": 0.0, "state": True,
-                "drink_type": float(self.client_preference), "was_used": False,
+                "drink_type": float(self.client_preference), "was_used": False, "is_shaken": False,
             })
 
         elif step == "at_serv_with_correct_drink":
@@ -338,7 +346,7 @@ class BartenderSim:
             dist, ang = self.random_position(self.serv_area)
             self.glass.update({
                 "distance": dist, "angle": ang, "state": True,
-                "drink_type": float(self.client_preference), "was_used": False,
+                "drink_type": float(self.client_preference), "was_used": False, "is_shaken": False,
             })
 
         elif step == "at_prep_with_already_used_glass":
@@ -365,6 +373,20 @@ class BartenderSim:
     # Policies
     # ------------------------------------------------------------------ #
 
+    def shake_glass_policy(self):
+        """Shake the glass to mix the drink."""
+        # Require: glass in hand, glass exists, glass has a drink (state==True),
+        # glass not already used, and not already shaken.
+        if (
+            not self.glass_in_left_hand
+            or not self.glass
+            or not self.glass.get("state", False)
+            or self.glass.get("was_used", False)
+            or self.glass.get("is_shaken", False)
+        ):
+            return
+        self.glass.update({"is_shaken": True})
+
     def pick_glass_policy(self):
         """Pick glass from prep or serving table."""
         if self.glass_in_left_hand:
@@ -390,14 +412,18 @@ class BartenderSim:
 
         if self.is_at_serving_table():
             self.glass_in_left_hand = False
+            # move glass to serving position
             self.glass.update({
                 "distance": self.serving_pos["distance"],
                 "angle": self.serving_pos["angle"],
             })
             # Serving event: only triggers if drink matches preference
             if self.glass["state"] and self._is_drink_matching_preference():
+                # latch whether the drink that is being served was shaken
+                self._served_shake_latch = bool(self.glass.get("is_shaken", False))
                 self.correct_drink_served = True
-                self.glass.update({"was_used": True, "state": False, "drink_type": 0.0})
+                # Now clean the glass state for the physical object
+                self.glass.update({"was_used": True, "state": False, "drink_type": 0.0, "is_shaken": False})
 
         elif self.is_at_preparation_table():
             # Placing at prep = cleaning the glass
@@ -407,6 +433,7 @@ class BartenderSim:
                 "angle": self.original_glass_pos["angle"],
                 "state": False,
                 "drink_type": 0.0,
+                "is_shaken": False,
                 # was_used stays unchanged: cleaned but still was_used if it was before
             })
 
@@ -416,7 +443,10 @@ class BartenderSim:
             return
         if not self.glass or self.glass["state"] or self.glass["was_used"]:
             return
-        self.glass.update({"state": True, "drink_type": float(self.picked_bottle)})
+        if not self.picked_bottle or self.picked_bottle <= 0:
+            return
+        # When preparing a fresh drink, ensure the shaken flag is cleared.
+        self.glass.update({"state": True, "drink_type": float(self.picked_bottle), "is_shaken": False})
 
     def change_position_policy(self):
         """Instant teleport between prep and serving tables."""
@@ -565,11 +595,13 @@ class BartenderSim:
             return 0.0
         if self.serve_reward_consumed:
             return 0.0
+        # Use served latch (captured at place_glass time) rather than current glass.is_shaken
         if (
-            self.glass_is_in_serving_position() and
-            self.glass and
-            self.correct_drink_served and
-            not self.glass_in_left_hand
+            self.glass_is_in_serving_position()
+            and self.glass
+            and self.correct_drink_served
+            and not self.glass_in_left_hand
+            and (self.client_likes_shake == self._served_shake_latch)
         ):
             self.serve_reward_consumed = True
             return 1.0
@@ -680,6 +712,7 @@ class BartenderSimNode(Node):
         msg.state = bool(gs["state"])
         msg.drink_type = float(gs["drink_type"])
         msg.was_used = bool(gs["was_used"])
+        msg.is_shaken = bool(gs["is_shaken"])
         self.perceptions["glass"].data.append(msg)
 
     def update_perceptions_from_simulator(self):
@@ -785,6 +818,7 @@ class BartenderSimNode(Node):
         client_msg = self.base_messages["client"]()
         client_msg.id = int(self.simulator.client_id)
         client_msg.preference = int(self.simulator.client_preference)
+        client_msg.likes_shake = bool(self.simulator.client_likes_shake)
         self.perceptions["client"].data.append(client_msg)
 
     # ------------------------------------------------------------------ #

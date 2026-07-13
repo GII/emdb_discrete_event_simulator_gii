@@ -1,6 +1,10 @@
 import math
 import numpy as np
 from enum import Enum
+import matplotlib
+import os
+if not os.environ.get('MPLBACKEND'):
+    matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
@@ -418,8 +422,10 @@ class Sim(object):
 
         # Generate Plots
         if self.visualize:
+            plt.rcParams['toolbar'] = 'None'  # Disable toolbar
+            plt.ioff()  # Turn off interactive mode
             self.fig = plt.figure()
-            self.fig.canvas.set_window_title('Simulator')
+            self.fig.canvas.manager.set_window_title('Simulator')
             self.ax = plt.axes(xlim=self.x_plt_bounds, ylim=self.y_plt_bounds)
             self.ax.axes.get_xaxis().set_visible(False)
             self.ax.axes.get_yaxis().set_visible(False)
@@ -584,12 +590,30 @@ class Sim(object):
         :type x1_y1: tuple
         :param x2_y2: Tuple with the coordinates of the second point (x2, y2).
         :type x2_y2: tuple
-        :return: Relative angle in degrees between the two points.
+        :return: Relative angle in degrees between the two points. If both positions are equal,
+                 returns 0.0.
         :rtype: float
         """
         (x1, y1) = x1_y1
         (x2, y2) = x2_y2
+        # Handle identical positions (avoid undefined direction). Use math.isclose for floats.
+        if math.isclose(x1, x2) and math.isclose(y1, y2):
+            return 0.0
         return math.atan2(y2 - y1, x2 - x1) * 180 / math.pi
+    
+    @staticmethod
+    def get_distance(x1_y1, x2_y2):
+        """
+        Return the Euclidean distance between two points.
+
+        :param x1_y1: Tuple with the coordinates of the first point (x1, y1).
+        :type x1_y1: tuple
+        :param x2_y2: Tuple with the coordinates of the second point (x2, y2).
+        :type x2_y2: tuple
+        :return: Euclidean distance between the two points.
+        :rtype: float
+        """
+        return distance.euclidean(x1_y1, x2_y2)
 
 
 
@@ -599,7 +623,7 @@ class Baxter2Arms(Sim):
     """
     Class that simulates the Baxter robot.
     """
-    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), visualize=True, verbose=False):
+    def __init__(self, x_size=(0, 2500), y_size=(0, 1000), x_bounds=(100, 2400), y_bounds=(50, 800), grasp_range=80.0, visualize=True, verbose=False):
         """
         Create the Baxter robot with two arms.
 
@@ -622,9 +646,10 @@ class Baxter2Arms(Sim):
         self.baxter_left=Robot("baxter_left", 700, 300, 90)
         self.baxter_right=Robot("baxter_right", 1800, 300, 90)
         self.robots=[self.baxter_left, self.baxter_right]
-        self.baxter_left_limits=((self.x_bounds[0], self.x_bounds[1]/2),self.y_bounds)
-        self.baxter_right_limits=((self.x_bounds[1]/2, self.x_bounds[1]),self.y_bounds)
+        self.baxter_left_limits=((self.x_bounds[0], (self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0]),self.y_bounds)
+        self.baxter_right_limits=(((self.x_bounds[1]-self.x_bounds[0])/2 + self.x_bounds[0], self.x_bounds[1]),self.y_bounds)
         self.entities.extend(self.robots) #Include robots in entities list
+        self.grasp_range = grasp_range  # Range to grasp objects
 
     def move_robot_arm(self, arm:Robot, vel):
         """
@@ -758,7 +783,7 @@ class SimpleScenario(Baxter2Arms):
     """
     Class that implements a simple scenario with a Baxter robot and a ball.
     """
-    def __init__(self, x_size=(0, 2800), y_size=(0, 1550), x_bounds=(100, 2700), y_bounds=(50, 1350), visualize=True, logger=None):
+    def __init__(self, x_size=(0, 2800), y_size=(0, 1550), x_bounds=(100, 2700), y_bounds=(50, 1350), grasp_range=80.0, place_range=80.0, visualize=True, logger=None):
         """
         Create the simple scenario with a Baxter robot and a ball.
 
@@ -775,7 +800,7 @@ class SimpleScenario(Baxter2Arms):
         :param logger: Logger to log debug information.
         :type logger: rclpy.impl.rcutils_logger.RcutilsLogger
         """
-        super().__init__(x_size, y_size, x_bounds, y_bounds, visualize)
+        super().__init__(x_size, y_size, x_bounds, y_bounds, grasp_range, visualize)
         self.logger:RcutilsLogger=logger
         ##Objects
         self.objects=[]
@@ -784,6 +809,7 @@ class SimpleScenario(Baxter2Arms):
 
         ##Boxes
         self.box1 = Box("box_1", 900, 400, w=150, h=150)
+        self.place_range = place_range  # Range to place objects in the box
         self.entities.append(self.box1)
         
         # Show figure and patches
@@ -805,7 +831,7 @@ class SimpleScenario(Baxter2Arms):
         for robot in self.robots:
             #Catch close objects
             if robot.gripper_state and not robot.catched_object:
-                close_object=self.filter_entities(self.get_close_entities(robot, threshold=50), EntityType.BALL)
+                close_object=self.filter_entities(self.get_close_entities(robot, threshold=self.grasp_range), EntityType.BALL)
                 if close_object:
                     if not close_object[0].catched_by:
                         robot.catched_object=close_object[0]
@@ -815,7 +841,7 @@ class SimpleScenario(Baxter2Arms):
                 robot.catched_object=None
 
             #Check if something is in the box
-            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=50), EntityType.BALL)
+            objs_close=self.filter_entities(self.get_close_entities(self.box1, threshold=self.place_range), EntityType.BALL)
             self.box1.contents=[]
             for obj in objs_close:
                 if not obj.catched_by:
@@ -853,16 +879,19 @@ class SimpleScenario(Baxter2Arms):
         self.box1.contents=[]
         #TODO: Reset grippers
 
-        for object in self.objects:
-            object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
-            object.catched_by=None
+        first_shuffle=True
+        while any([distance.euclidean(self.box1.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or any([distance.euclidean(self.baxter_left.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or any([distance.euclidean(self.baxter_right.get_pos(), obj.get_pos()) < self.grasp_range for obj in self.objects]) or first_shuffle:
+            self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+            for object in self.objects:
+                object.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
+                object.catched_by=None
+            first_shuffle=False
+        self.world_rules()
 
-        
-    
 
 if __name__ == '__main__':
     """Simulator Demo"""
-    a = ComplexScenario()
+    a = SimpleScenario()
 
     while True:
         vel_l=random.uniform(0, 60)

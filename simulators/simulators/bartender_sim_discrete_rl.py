@@ -985,7 +985,7 @@ class BartenderSimNode(Node):
                 callback_group=self.cbgroup_server,
             )
             self.perceptions_timer = self.create_timer(
-                0.01, self.publish_perceptions,
+                0.05, self.publish_perceptions,
                 callback_group=self.cbgroup_server,
             )
 

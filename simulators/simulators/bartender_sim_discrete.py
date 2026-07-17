@@ -655,7 +655,7 @@ class BartenderSimNode(Node):
             Float32,
             "cognitive_node/world_model/last_bottle",
             self.agent_bottle_callback,
-            10
+            1
         )
 
     def agent_bottle_callback(self, msg):

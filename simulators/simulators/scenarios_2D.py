@@ -875,7 +875,7 @@ class SimpleScenario(Baxter2Arms):
         self.baxter_right.set_pos(rng.uniform(self.baxter_right_limits[0][0], self.baxter_right_limits[0][1]), rng.uniform(self.baxter_right_limits[1][0], self.baxter_right_limits[1][1])) 
         self.baxter_left.set_gripper(False)
         self.baxter_right.set_gripper(False)
-        
+        self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
         self.box1.contents=[]
         #TODO: Reset grippers
 

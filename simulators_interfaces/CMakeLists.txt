@@ -12,8 +12,15 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/BartenderGripperMsg.msg"
+  "msg/BottleListMsg.msg"
+  "msg/BottleMsg.msg"
+  "msg/ClientListMsg.msg"
+  "msg/ClientMsg.msg"
   "msg/FruitListMsg.msg"
   "msg/FruitMsg.msg"
+  "msg/GlassListMsg.msg"
+  "msg/GlassMsg.msg"
   "msg/Object2DListMsg.msg"
   "msg/Object2DMsg.msg"
   "msg/ObjectListMsg.msg"
@@ -22,12 +29,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PumpPanelMsg.msg"
   "msg/ScaleListMsg.msg"
   "msg/ScaleMsg.msg"
-  "msg/BottleListMsg.msg"
-  "msg/BottleMsg.msg"
-  "msg/GlassListMsg.msg"
-  "msg/GlassMsg.msg"
-  "msg/ClientMsg.msg"
-  "msg/ClientListMsg.msg"
   "srv/CalculateClosestPosition.srv"
   "srv/ObjectPickableWithTwoHands.srv"
   "srv/ObjectTooFar.srv"

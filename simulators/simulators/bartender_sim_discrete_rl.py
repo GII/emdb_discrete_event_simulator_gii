@@ -38,6 +38,7 @@ class BartenderSim:
     def __init__(self, random_seed=0, n_bottles=3):
         self.random_seed = resolve_seed(random_seed)
         self.rng = numpy.random.default_rng(self.random_seed)
+        self.service_world_reset = False
         self.n_bottles = n_bottles
         self.current_curriculum = "balanced"
         self.curriculum = {
@@ -153,7 +154,7 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def _get_valid_bottle_ids(self):
-        return [int(b["id"]) for b in self.bottles] if self.bottles else list(range(1, self.n_bottles + 1))
+        return [int(b["drink_type"]) for b in self.bottles] if self.bottles else list(range(1, self.n_bottles + 1))
 
     def _get_wrong_drink_type(self, reference_drink):
         """Return a valid drink id different from the provided reference."""
@@ -242,7 +243,7 @@ class BartenderSim:
         self.bottles = []
         for i in range(1, self.n_bottles + 1):
             x, y = self.random_position(area)
-            self.bottles.append(dict(x=x, y=y, id=i))
+            self.bottles.append(dict(x=x, y=y, drink_type=i))
 
     def generate_glass(self, area=None, state=False, drink_type=0.0, was_used=False, is_shaken=False):
         """Generate a glass at a random position inside the preparation area."""
@@ -306,7 +307,7 @@ class BartenderSim:
                     bottle_id = int(self.rng.choice(wrong_bottle_ids if wrong_bottle_ids else valid_bottle_ids))
                 # Set the right hand to hold the selected bottle
                 for bottle in self.bottles:
-                    if int(bottle["id"]) == bottle_id:
+                    if int(bottle["drink_type"]) == bottle_id:
                         self._set_gripper_object(self.right_hand, bottle)
                         break
 
@@ -370,7 +371,7 @@ class BartenderSim:
     def get_bottles_state(self):
         """Get the current state of all bottles."""
         return [
-            {"x": float(b["x"]), "y": float(b["y"]), "id": int(b["id"])}
+            {"x": float(b["x"]), "y": float(b["y"]), "drink_type": int(b["drink_type"])}
             for b in self.bottles
         ] if self.bottles else []
 
@@ -502,7 +503,7 @@ class BartenderSim:
             self.glass.update({"x": x, "y": y})
             # If the glass was used, mark it as cleaned and reset its state. If it has the wrong drink, also clean it.
             if self.glass.get("was_used", False) or (not self._is_drink_matching_preference() and self.glass.get("state", False)):
-                self.glass_was_cleaned = True
+                self.glass_was_cleaned = True if self.glass.get("was_used", False) else False # Don't provide reward for cleaning a wrong drink, only for cleaning a used glass.
                 self.glass.update({
                     "state": False,
                     "drink_type": 0.0,
@@ -519,7 +520,7 @@ class BartenderSim:
         if self.glass["state"]:
             return
         # Read the drink type from the bottle in the right hand
-        drink_type = float(self.right_hand["contents"]["id"])
+        drink_type = float(self.right_hand["contents"]["drink_type"])
 
         # When preparing a fresh drink, ensure the shaken flag is cleared.
         self.glass.update({"state": True, "drink_type": drink_type, "is_shaken": False})
@@ -538,7 +539,7 @@ class BartenderSim:
             return
         bottle = None
         for b in self.bottles:
-            if b["id"] == bottle_id:
+            if b["drink_type"] == bottle_id:
                 bottle = b
         if not bottle:
             return
@@ -715,7 +716,7 @@ class BartenderSimNode(Node):
             msg = self.base_messages["bottles"]()
             msg.distance = float(self.get_distance(robot_xy, bottle_xy))
             msg.angle = self.get_relative_angle_to_robot(robot_xy, bottle_xy, robot_orientation)
-            msg.id = int(b["id"])
+            msg.drink_type = int(b["drink_type"])
             msg.x = float(bottle_xy[0] - robot_xy[0])
             msg.y = float(bottle_xy[1] - robot_xy[1])
             self.perceptions["bottles"].data.append(msg)
@@ -768,14 +769,14 @@ class BartenderSimNode(Node):
         robot_state = self.simulator.get_robot_state()
         hands_state = self.simulator.get_hands_state()
 
-        self.perceptions["robot_position"].data = float(robot_state["position_id"])
+        self.perceptions["robot_position"].data = min(float(robot_state["position_id"]), 0.95)
         self.perceptions["glass_in_left_hand"].data = bool(hands_state["left_hand"]["used"])
         self.perceptions["glass_in_left_hand"].contents = "glass" if hands_state["left_hand"]["used"] else ""
         self.perceptions["glass_in_left_hand"].contents_id = int(hands_state["left_hand"]["contents"].get("drink_type", -1))
 
         self.perceptions["bottle_in_right_hand"].data = bool(hands_state["right_hand"]["used"])
         self.perceptions["bottle_in_right_hand"].contents = "bottle" if hands_state["right_hand"]["used"] else ""
-        self.perceptions["bottle_in_right_hand"].contents_id = int(hands_state["right_hand"]["contents"].get("id", -1))
+        self.perceptions["bottle_in_right_hand"].contents_id = int(hands_state["right_hand"]["contents"].get("drink_type", -1))
 
 
     @staticmethod
@@ -830,12 +831,14 @@ class BartenderSimNode(Node):
         self.update_perceptions_from_simulator()
         self.update_reward_sensor()
         self.publish_perceptions()
+        self.get_logger().info("AFTER WORLD RESET:")
+        self._log_simulator_state()
 
     def update_stage(self):
         """Update the stage perception based on the current iteration."""
 
         for stage, start_iter in self.change_stage_iterations.items():
-            if self.simulator.iteration >= int(start_iter):
+            if self.iteration >= int(start_iter):
                 self.current_stage = stage
 
         if self.current_stage == "stage0":
@@ -844,6 +847,7 @@ class BartenderSimNode(Node):
             self.simulator.current_curriculum = "balanced"
         if self.current_stage == "stage2":
             self.simulator.current_curriculum = "benchmark"
+        self.get_logger().info(f"Current stage: {self.current_stage}, curriculum: {self.simulator.current_curriculum}")
 
     def update_reward_sensor(self):
         if "progress_goal" in self.perceptions:
@@ -910,7 +914,7 @@ class BartenderSimNode(Node):
     def pick_bottle_policy(self, perception=None):
         """Pick bottle by agent choice, fallback to client preference, then first available."""
         perception = Container.from_msg(perception)
-        bottle_id_raw = perception.read().sel(features=["bottles:id"]).values[-1]
+        bottle_id_raw = perception.read().sel(features=["bottles:drink_type"]).values[-1]
         bottle_id = int(bottle_id_raw*(self.simulator.n_bottles+1)) if not math.isclose(bottle_id_raw, 0.98) else self.simulator.n_bottles 
         self.simulator.pick_bottle_policy(bottle_id=bottle_id)
 
@@ -936,7 +940,8 @@ class BartenderSimNode(Node):
         self.iteration = data.iteration
 
         self.update_reward_sensor()
-        if data.command == "reset_world":
+        self.update_stage()
+        if data.command == "reset_world" and not self.service_world_reset:
             self.reset_world(data)
         elif data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
@@ -1025,6 +1030,7 @@ class BartenderSimNode(Node):
             )
 
         if service_world_reset:
+            self.service_world_reset = True
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
             self.create_service(
                 self.message_world_reset, service_world_reset,

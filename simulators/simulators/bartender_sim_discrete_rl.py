@@ -272,6 +272,9 @@ class BartenderSim:
         return bool(self.rng.random() < probability)
 
     def _generate_world_from_curriculum(self):
+        self.correct_drink_served = False
+        self.glass_was_cleaned = False
+
         # Define robot position
         if self._sample_curriculum_bool(0.5):
             self._set_robot_position("serv")

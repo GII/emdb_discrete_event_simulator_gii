@@ -168,6 +168,12 @@ class BartenderSim:
             return False
         return int(self.glass["drink_type"]) == int(self.client["preference"]) and (self.client["likes_shake"] == self.glass["is_shaken"])
 
+    def _is_drink_wrong(self):
+        """Check whether the current drink is wrong in a way that requires cleaning (wrong type or shaken when not desired)."""
+        if not self.glass or not self.glass["state"] or self.glass["was_used"]:
+            return False
+        return int(self.glass["drink_type"]) != int(self.client["preference"]) or (self.glass["is_shaken"] and not self.client["likes_shake"])
+
     def is_client_preference_known(self):
         """Whether client preference is known to the agent in the current episode."""
         return bool(self.client["preference_known"])
@@ -505,7 +511,7 @@ class BartenderSim:
             x, y = self.random_position(self.prep_area)
             self.glass.update({"x": x, "y": y})
             # If the glass was used, mark it as cleaned and reset its state. If it has the wrong drink, also clean it.
-            if self.glass.get("was_used", False) or (not self._is_drink_matching_preference() and self.glass.get("state", False)):
+            if self.glass.get("was_used", False) or self._is_drink_wrong():
                 self.glass_was_cleaned = True if self.glass.get("was_used", False) else False # Don't provide reward for cleaning a wrong drink, only for cleaning a used glass.
                 self.glass.update({
                     "state": False,

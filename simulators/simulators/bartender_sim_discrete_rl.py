@@ -641,14 +641,17 @@ class BartenderSim:
 
     def get_serve_the_drink_goal(self):
         """Reward = 1.0 when correct drink is served."""
-        if self.correct_drink_served:
+        glass_state = self.get_glass_state()
+        client_state = self.client.get("id", 0)
+        if not glass_state["was_used"] and client_state:
             return 1.0
         else:
             return 0.0
 
     def get_return_the_glass_goal(self):
         """Reward = 1.0 once per episode when used glass returns to prep."""
-        if self.glass_was_cleaned:
+        glass_state=self.get_glass_state()
+        if glass_state["was_used"]:
             return 1.0
         else:
             return 0.0

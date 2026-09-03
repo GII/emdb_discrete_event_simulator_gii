@@ -656,6 +656,10 @@ class BartenderSim:
         else:
             return 1.0
 
+    def finished_signal(self):
+        """Check if the episode is finished based on the current state."""
+        return self.correct_drink_served and self.glass_was_cleaned
+
 
 # ======================================================================== #
 # ROS2 Node wrapper
@@ -872,6 +876,9 @@ class BartenderSimNode(Node):
         if "return_the_glass_goal" in self.perceptions:
             self.perceptions["return_the_glass_goal"].data = self.simulator.get_return_the_glass_goal()
             self.get_logger().info(f"Return the glass reward: {self.perceptions['return_the_glass_goal'].data}")
+        if "finished_signal" in self.perceptions:
+            self.perceptions["finished_signal"].data = self.simulator.finished_signal()
+            self.get_logger().info(f"Finished signal: {self.perceptions['finished_signal'].data}")
 
     def publish_perceptions(self):
         for ident, publisher in self.sim_publishers.items():

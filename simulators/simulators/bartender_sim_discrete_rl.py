@@ -35,7 +35,7 @@ class BartenderSim:
      10. is_in_transit() exposed
     """
 
-    def __init__(self, random_seed=0, n_bottles=3):
+    def __init__(self, random_seed=0, n_bottles=3, single_client=True):
         self.random_seed = resolve_seed(random_seed)
         self.rng = numpy.random.default_rng(self.random_seed)
         self.service_world_reset = False
@@ -71,19 +71,19 @@ class BartenderSim:
                     "correct_bottle": 0.75,
                     "grasped_glass": 0.5,
                     "glass_at_serv": 0.5,
-                    "empty_glass": 0.5,
-                    "correct_drink": 0.75,
+                    "empty_glass": 0.25,
+                    "correct_drink": 0.8,
                     "used_glass": 0.25,
                 },
                 "preparing": {
                     "bottle_at_serv": 0.25,
-                    "grasped_bottle": 0.667,
+                    "grasped_bottle": 0.8,
                     "correct_bottle": 0.75,
                     "grasped_glass": 0.5,
                     "glass_at_serv": 0.5,
-                    "empty_glass": 0.333,
-                    "correct_drink": 0.5,
-                    "used_glass": 0.5,
+                    "empty_glass": 0.25,
+                    "correct_drink": 0.8,
+                    "used_glass": 0.25,
                 },
             },
             "benchmark": {
@@ -110,15 +110,21 @@ class BartenderSim:
             },
         }
         self.client_preferences = {}
-        for client_id in range(1, 4):
-            local_rng = numpy.random.default_rng(self.random_seed ^ (client_id * 0xDEAD))
-            self.client_preferences[client_id] = {
-                "preference": int(local_rng.integers(1, n_bottles + 1)),
-                "likes_shake": bool(local_rng.integers(0, 2)),
-            }
 
+        #Client generation
+        self.single_client = single_client
         
-        
+        if self.single_client:
+            self.client_preferences[1] = {"preference": 2, "likes_shake": True}
+
+        else:
+            for client_id in range(1, 4):
+                local_rng = numpy.random.default_rng(self.random_seed ^ (client_id * 0xDEAD))
+                self.client_preferences[client_id] = {
+                    "preference": int(local_rng.integers(1, n_bottles + 1)),
+                    "likes_shake": False,
+                }
+            self.client_preferences[2]["likes_shake"] = True # Control client with shaking preference
 
         self.prep_area = {"x_min": 0.0, "x_max": 0.6, "y_min": 0.9, "y_max": 1.1}
         self.serv_area = {"x_min": 0.4, "x_max": 0.7, "y_min": 0.5, "y_max": 0.9}
@@ -448,11 +454,14 @@ class BartenderSim:
 
     def reset_world(self):
         """Reset the world to a new random state."""
-        self.correct_drink_served = False
-        self.glass_was_cleaned = False
+        if self.single_client:
+            # Single Client (by default 1)
+            cid = 1
 
-        # Random client — preferences are stored in self.client_preferences and are stable per client_id
-        cid = int(self.rng.integers(1, 4))
+        else:
+            # Random client — preferences are stored in self.client_preferences and are stable per client_id
+            cid = int(self.rng.integers(1, 4))
+        
         self.client = self._make_client_state(cid)
         self.generate_world()
 
@@ -689,7 +698,12 @@ class BartenderSimNode(Node):
             descriptor=ParameterDescriptor(dynamic_typing=True)
         ).get_parameter_value().string_value
 
-        self.simulator = BartenderSim(random_seed=self.random_seed)
+        self.single_client = self.declare_parameter(
+            'single_client', value=False
+        ).get_parameter_value().bool_value
+        self.get_logger().info(f"Single client mode: {self.single_client}")
+
+        self.simulator = BartenderSim(random_seed=self.random_seed, single_client=self.single_client)
         self.random_seed = self.simulator.random_seed
         self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 

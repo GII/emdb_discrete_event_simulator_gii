@@ -18,6 +18,10 @@ from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname, resolve_seed
 
 
+# Default period (seconds) of the periodic publication of perceptions.
+DEFAULT_PERCEPTION_PERIOD = 0.01
+
+
 class BartenderSim:
     """
     BartenderSim v2 - Fixed + improved discrete simulator.
@@ -1093,7 +1097,7 @@ class BartenderSimNode(Node):
                 callback_group=self.cbgroup_server,
             )
             self.perceptions_timer = self.create_timer(
-                0.05, self.publish_perceptions,
+                self.perception_period, self.publish_perceptions,
                 callback_group=self.cbgroup_server,
             )
 
@@ -1123,6 +1127,8 @@ class BartenderSimNode(Node):
         with open(self.config_file, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yamlloader.ordereddict.CLoader)
 
+        # Period (seconds) of the periodic publication of perceptions.
+        self.perception_period = config["DiscreteEventSimulator"].get("perception_period", DEFAULT_PERCEPTION_PERIOD)
         self.setup_experiment_stages(config["DiscreteEventSimulator"]["Stages"])
         self.setup_client_stages(config["DiscreteEventSimulator"].get("ClientStages", {}))
         self.setup_perceptions(config["DiscreteEventSimulator"]["Perceptions"])

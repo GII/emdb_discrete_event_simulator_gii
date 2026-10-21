@@ -563,16 +563,17 @@ class BartenderSim:
     def pick_bottle_policy(self, bottle_id=None):
         """Pick bottle by agent choice, fallback to client preference, then first available."""
         if self.right_hand["used"] or not bottle_id:
-            return
+            return True
         bottle = None
         for b in self.bottles:
             if b["drink_type"] == bottle_id:
                 bottle = b
         if not bottle:
-            return
+            return False
         same_side = self.is_at_preparation_table() and self.obj_is_in_preparation_area(bottle) or self.is_at_serving_table() and self.obj_is_in_serving_position(bottle)
         if same_side:
             self._set_gripper_object(self.right_hand, bottle)
+        return True
 
     def place_bottle_policy(self):
         """Place the held bottle back to a random position in the prep area."""
@@ -984,7 +985,9 @@ class BartenderSimNode(Node):
         perception = Container.from_msg(perception)
         bottle_id_raw = perception.read().sel(features=["bottles:drink_type"]).values[-1]
         bottle_id = int(bottle_id_raw*(self.simulator.n_bottles+1)) if not math.isclose(bottle_id_raw, 0.98) else self.simulator.n_bottles 
-        self.simulator.pick_bottle_policy(bottle_id=bottle_id)
+        success = self.simulator.pick_bottle_policy(bottle_id=bottle_id)
+        if not success:
+            self.get_logger().error(f"Picked bottle with id {bottle_id} not found in the simulator state.")
 
     def place_bottle_policy(self, perception=None):
         """Place the held bottle back to a random position in the prep area."""

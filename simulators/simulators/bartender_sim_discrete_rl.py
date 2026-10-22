@@ -18,6 +18,10 @@ from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname, resolve_seed
 
 
+# Default period (seconds) of the periodic publication of perceptions.
+DEFAULT_PERCEPTION_PERIOD = 0.01
+
+
 class BartenderSim:
     """
     BartenderSim v2 - Fixed + improved discrete simulator.
@@ -456,7 +460,7 @@ class BartenderSim:
     # Reset
     # ------------------------------------------------------------------ #
 
-    def reset_world(self):
+    def reset_world(self, client_ids=None):
         """Reset the world to a new random state."""
         if self.single_client:
             # Single Client (by default 1)
@@ -464,7 +468,8 @@ class BartenderSim:
 
         else:
             # Random client — preferences are stored in self.client_preferences and are stable per client_id
-            cid = int(self.rng.integers(1, 4))
+            available_client_ids = client_ids or (1, 2, 3)
+            cid = int(self.rng.choice(available_client_ids))
         
         self.client = self._make_client_state(cid)
         self.generate_world()
@@ -558,16 +563,17 @@ class BartenderSim:
     def pick_bottle_policy(self, bottle_id=None):
         """Pick bottle by agent choice, fallback to client preference, then first available."""
         if self.right_hand["used"] or not bottle_id:
-            return
+            return True
         bottle = None
         for b in self.bottles:
             if b["drink_type"] == bottle_id:
                 bottle = b
         if not bottle:
-            return
+            return False
         same_side = self.is_at_preparation_table() and self.obj_is_in_preparation_area(bottle) or self.is_at_serving_table() and self.obj_is_in_serving_position(bottle)
         if same_side:
             self._set_gripper_object(self.right_hand, bottle)
+        return True
 
     def place_bottle_policy(self):
         """Place the held bottle back to a random position in the prep area."""
@@ -692,6 +698,7 @@ class BartenderSimNode(Node):
         self.perceptions = {}
         self.sim_publishers = {}
         self.change_stage_iterations = {}
+        self.change_client_stage_iterations = {}
 
         self.random_seed = self.declare_parameter(
             'random_seed', value=0
@@ -723,6 +730,7 @@ class BartenderSimNode(Node):
 
         self.iteration = 0
         self.current_stage = ""
+        self.current_client_stage = ""
 
         # self.agent_bottle_subscription = self.create_subscription(
         #     Float32,
@@ -866,7 +874,10 @@ class BartenderSimNode(Node):
 
     def reset_world(self, data=None):
         self.get_logger().info("Resetting world...")
-        self.simulator.reset_world()
+        client_ids = None
+        if not self.single_client:
+            client_ids = self._get_client_ids_for_stage()
+        self.simulator.reset_world(client_ids=client_ids)
         self.update_perceptions_from_simulator()
         self.update_reward_sensor()
         self.publish_perceptions()
@@ -880,13 +891,29 @@ class BartenderSimNode(Node):
             if self.iteration >= int(start_iter):
                 self.current_stage = stage
 
+        for stage, start_iter in self.change_client_stage_iterations.items():
+            if self.iteration >= int(start_iter):
+                self.current_client_stage = stage
+
         if self.current_stage == "stage0":
             self.simulator.current_curriculum = "help"
         if self.current_stage == "stage1":
             self.simulator.current_curriculum = "balanced"
         if self.current_stage == "stage2":
             self.simulator.current_curriculum = "benchmark"
-        self.get_logger().info(f"Current stage: {self.current_stage}, curriculum: {self.simulator.current_curriculum}")
+        self.get_logger().info(
+            f"Current stage: {self.current_stage}, client stage: {self.current_client_stage}, "
+            f"curriculum: {self.simulator.current_curriculum}"
+        )
+
+    def _get_client_ids_for_stage(self):
+        if self.single_client:
+            return None
+        if self.current_client_stage in ("client_stage0", "client_stage1", "client_stage2"):
+            return (1, 2)
+        if self.current_client_stage == "client_stage3":
+            return (3,)
+        return (1, 2, 3)
 
     def update_reward_sensor(self):
         if "progress_goal" in self.perceptions:
@@ -958,7 +985,9 @@ class BartenderSimNode(Node):
         perception = Container.from_msg(perception)
         bottle_id_raw = perception.read().sel(features=["bottles:drink_type"]).values[-1]
         bottle_id = int(bottle_id_raw*(self.simulator.n_bottles+1)) if not math.isclose(bottle_id_raw, 0.98) else self.simulator.n_bottles 
-        self.simulator.pick_bottle_policy(bottle_id=bottle_id)
+        success = self.simulator.pick_bottle_policy(bottle_id=bottle_id)
+        if not success:
+            self.get_logger().error(f"Picked bottle with id {bottle_id} not found in the simulator state.")
 
     def place_bottle_policy(self, perception=None):
         """Place the held bottle back to a random position in the prep area."""
@@ -1022,6 +1051,10 @@ class BartenderSimNode(Node):
         for stage in stages:
             self.change_stage_iterations[stage] = stages[stage]
 
+    def setup_client_stages(self, stages):
+        for stage in stages:
+            self.change_client_stage_iterations[stage] = stages[stage]
+
     def setup_perceptions(self, perceptions):
         for perception in perceptions:
             sid = perception["name"]
@@ -1067,7 +1100,7 @@ class BartenderSimNode(Node):
                 callback_group=self.cbgroup_server,
             )
             self.perceptions_timer = self.create_timer(
-                0.05, self.publish_perceptions,
+                self.perception_period, self.publish_perceptions,
                 callback_group=self.cbgroup_server,
             )
 
@@ -1097,7 +1130,10 @@ class BartenderSimNode(Node):
         with open(self.config_file, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yamlloader.ordereddict.CLoader)
 
+        # Period (seconds) of the periodic publication of perceptions.
+        self.perception_period = config["DiscreteEventSimulator"].get("perception_period", DEFAULT_PERCEPTION_PERIOD)
         self.setup_experiment_stages(config["DiscreteEventSimulator"]["Stages"])
+        self.setup_client_stages(config["DiscreteEventSimulator"].get("ClientStages", {}))
         self.setup_perceptions(config["DiscreteEventSimulator"]["Perceptions"])
         self.setup_control_channel(config["Control"])
         self.load_experiment_file_in_commander()

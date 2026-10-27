@@ -7,8 +7,15 @@ import yamlloader
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
+try:
+    # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
+    from rclpy.experimental import EventsExecutor
+except ImportError:
+    EventsExecutor = None
 
 from core.service_client import ServiceClient
+from core.blocking_wait_check import register_executor_thread
 from core.utils import class_from_classname, resolve_seed
 from core_interfaces.srv import LoadConfig
 
@@ -664,9 +671,14 @@ def main(args=None):
     rclpy.init(args=args)
     sim = FruitServeSim()
     sim.load_configuration()
+    # Much cheaper than the Python executors. The simulator runs in a single thread either way, and
+    # none of its callbacks waits for anything, so callback groups are not needed.
+    executor = EventsExecutor() if EventsExecutor is not None else SingleThreadedExecutor()
+    executor.add_node(sim)
+    register_executor_thread() # The callbacks of the EventsExecutor are not visible in the Python stack
 
     try:
-        rclpy.spin(sim)
+        executor.spin()
     except KeyboardInterrupt:
         print("Keyboard Interrupt Detected: Shutting down simulator...")
     finally:

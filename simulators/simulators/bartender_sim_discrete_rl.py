@@ -7,6 +7,12 @@ import yaml
 import yamlloader
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
+try:
+    # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
+    from rclpy.experimental import EventsExecutor
+except ImportError:
+    EventsExecutor = None
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from std_msgs.msg import Float32
@@ -14,6 +20,7 @@ from scipy.spatial import distance
 
 from core.container import Container
 from core.service_client import ServiceClient
+from core.blocking_wait_check import register_executor_thread
 from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname, resolve_seed
 
@@ -1147,8 +1154,13 @@ def main(args=None):
     rclpy.init(args=args)
     sim = BartenderSimNode()
     sim.load_configuration()
+    # Much cheaper than the Python executors. The simulator runs in a single thread either way, and
+    # none of its callbacks waits for anything, so callback groups are not needed.
+    executor = EventsExecutor() if EventsExecutor is not None else SingleThreadedExecutor()
+    executor.add_node(sim)
+    register_executor_thread() # The callbacks of the EventsExecutor are not visible in the Python stack
     try:
-        rclpy.spin(sim)
+        executor.spin()
     except KeyboardInterrupt:
         print("Keyboard Interrupt: shutting down simulator...")
     finally:

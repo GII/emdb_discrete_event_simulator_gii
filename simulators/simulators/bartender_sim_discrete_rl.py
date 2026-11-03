@@ -49,7 +49,6 @@ class BartenderSim:
     def __init__(self, random_seed=0, n_bottles=3, single_client=True, random_preferences=False):
         self.random_seed = resolve_seed(random_seed)
         self.rng = numpy.random.default_rng(self.random_seed)
-        self.service_world_reset = False
         self.n_bottles = n_bottles
         self.current_curriculum = "balanced"
         self.curriculum = {
@@ -1019,9 +1018,8 @@ class BartenderSimNode(Node):
 
         self.update_reward_sensor()
         self.update_stage()
-        if data.command == "reset_world" and not self.service_world_reset:
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 
@@ -1112,7 +1110,6 @@ class BartenderSimNode(Node):
             )
 
         if service_world_reset:
-            self.service_world_reset = True
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
             self.create_service(
                 self.message_world_reset, service_world_reset,

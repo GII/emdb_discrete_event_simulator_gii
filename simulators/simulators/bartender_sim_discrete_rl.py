@@ -7,6 +7,7 @@ import yaml
 import yamlloader
 import rclpy
 from rclpy.node import Node
+from rclpy.logging import LoggingSeverity
 from rclpy.executors import SingleThreadedExecutor
 try:
     # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
@@ -937,21 +938,24 @@ class BartenderSimNode(Node):
             self.get_logger().info(f"Finished signal: {self.perceptions['finished_signal'].data}")
 
     def publish_perceptions(self):
+        # The debug texts are built only if they are going to be logged: perceptions are published every period
+        debug = self.get_logger().is_enabled_for(LoggingSeverity.DEBUG)
         for ident, publisher in self.sim_publishers.items():
             perception = self.perceptions[ident]
-            if hasattr(perception, "data"):
-                debug_value = perception.data
-            elif hasattr(perception, "id"):
-                debug_value = {
-                    "id": perception.id,
-                    "distance": perception.distance,
-                    "angle": perception.angle,
-                    "x": perception.x,
-                    "y": perception.y,
-                }
-            else:
-                debug_value = perception
-            self.get_logger().debug(f"Publishing {ident} = {debug_value}")
+            if debug:
+                if hasattr(perception, "data"):
+                    debug_value = perception.data
+                elif hasattr(perception, "id"):
+                    debug_value = {
+                        "id": perception.id,
+                        "distance": perception.distance,
+                        "angle": perception.angle,
+                        "x": perception.x,
+                        "y": perception.y,
+                    }
+                else:
+                    debug_value = perception
+                self.get_logger().debug(f"Publishing {ident} = {debug_value}")
             publisher.publish(perception)
 
     # ------------------------------------------------------------------ #

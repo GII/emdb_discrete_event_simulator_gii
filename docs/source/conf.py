@@ -35,6 +35,7 @@ exclude_patterns = []
 
 autodoc_mock_imports = [
     "rclpy",
+    "std_msgs",
     "rcl_interfaces",
     "core",
     "core_interfaces",

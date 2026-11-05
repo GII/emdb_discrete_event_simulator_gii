@@ -381,8 +381,8 @@ class Sim(object):
     """ Class that implements a Simulator
     
     This simulator makes possible to make/test different experiments in a virtual scenario.
-    It contains the two arms of the Baxter robot, the Robobo! robot, some boxes and a
-    ball.
+    It is the base class of the scenarios, which add the robot and the objects: Baxter2Arms has the two arms of the
+    Baxter robot, and SimpleScenario adds a ball and a box to them.
     
     The implemented methods allow the user to move both robots throw the scenario (with
     and without the ball), get distances and relative angles between the different objects 
@@ -635,6 +635,8 @@ class Baxter2Arms(Sim):
         :type x_bounds: tuple
         :param y_bounds: Movement limits in the y axis.
         :type y_bounds: tuple
+        :param grasp_range: Maximum distance to grasp an object.
+        :type grasp_range: float
         :param visualize: If True, the simulator will visualize the objects in a plot.
         :type visualize: bool
         :param verbose: If True, the simulator will print debug information.
@@ -795,6 +797,10 @@ class SimpleScenario(Baxter2Arms):
         :type x_bounds: tuple
         :param y_bounds: Movement limits in the y axis.
         :type y_bounds: tuple
+        :param grasp_range: Maximum distance to grasp an object.
+        :type grasp_range: float
+        :param place_range: Maximum distance to place an object.
+        :type place_range: float
         :param visualize: If True, the simulator will visualize the objects in a plot.
         :type visualize: bool
         :param logger: Logger to log debug information.

@@ -277,7 +277,7 @@ class PumpPanelSim(Node):
 
         :param data: The message that contains the command to reset the world. It is not used.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
-        cognitive_processes_interfaces.srv.WorldReset.Request
+            cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info("Resetting world...")
         self.initial_perceptions()
@@ -317,9 +317,10 @@ class PumpPanelSim(Node):
 
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received: it simulates the values of the panel and updates the iteration and the reward sensor.
+        Only the "end" command has another effect, since world resets arrive through the world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
@@ -336,11 +337,11 @@ class PumpPanelSim(Node):
         Execute a policy and publish new perceptions.
 
         :param request: The message that contains the policy execute and its parameter.
-        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Request
+        :type request: ROS srv defined in the config file. It needs the policy and parameter fields, which cognitive_node_interfaces.srv.Policy does not have.
         :param response: Response of the success of the execution of the action.
-        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
+        :type response: ROS srv defined in the config file.
         :return: Response indicating the success of the action execution.
-        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
+        :rtype: ROS srv defined in the config file.
         """
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")

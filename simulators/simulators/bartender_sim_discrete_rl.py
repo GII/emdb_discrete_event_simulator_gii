@@ -30,21 +30,20 @@ from core.utils import class_from_classname, resolve_seed
 DEFAULT_PERCEPTION_PERIOD = 0.01
 
 
+# BartenderSim v2. Key fixes vs the original simulator:
+# 1. reset_world: if→elif chains; no silent fall-through
+# 2. ask_nicely: stable non-trivial per-client preferences (not pref=client_id)
+# 3. place_glass at prep: cleans drink (replaces discard_drink_policy)
+# 4. place_glass at serv: only marks served if drink matches preference
+# 5. pick_glass: can always pick up used glass (for return)
+# 6. place_bottle: only repositions the returned bottle, not all bottles
+# 7. change_position: instant teleport
+# 8. Reward hierarchy: fixed perverse incentive (wrong drink + bottle was > wrong drink)
+# 9. n_bottles configurable
+# 10. is_in_transit() exposed
 class BartenderSim:
     """
-    BartenderSim v2 - Fixed + improved discrete simulator.
-
-    Key fixes vs original:
-      1. reset_world: if→elif chains; no silent fall-through
-      2. ask_nicely: stable non-trivial per-client preferences (not pref=client_id)
-      3. place_glass at prep: cleans drink (replaces discard_drink_policy)
-      4. place_glass at serv: only marks served if drink matches preference
-      5. pick_glass: can always pick up used glass (for return)
-      6. place_bottle: only repositions the returned bottle, not all bottles
-      7. change_position: instant teleport
-      8. Reward hierarchy: fixed perverse incentive (wrong drink + bottle was > wrong drink)
-      9. n_bottles configurable
-     10. is_in_transit() exposed
+    Discrete simulator of the bartender experiment: pure simulation logic, without ROS communication.
     """
 
     def __init__(self, random_seed=0, n_bottles=3, single_client=True, random_preferences=False):
@@ -509,6 +508,7 @@ class BartenderSim:
     def place_glass_policy(self):
         """
         Place glass in context-appropriate location.
+
         - At serving table: places glass; marks served if drink matches preference.
         - At prep table: places glass AND cleans it (state=False, drink_type=0).
           This is the only way to clear a wrong drink — bring it back to prep.

@@ -37,3 +37,30 @@ PumpPanel Simulator
 .. automodule:: simulators.scenarios_2D
     :members:
     :show-inheritance:
+
+
+++++++++++++++++++++
+FruitServe Simulator
+++++++++++++++++++++
+
+.. automodule:: simulators.fruit_serve_sim_discrete
+    :members:
+    :show-inheritance:
+
+
+++++++++++++++++++++
+Bartender Simulator
+++++++++++++++++++++
+
+.. automodule:: simulators.bartender_sim_discrete
+    :members:
+    :show-inheritance:
+
+
++++++++++++++++++++++++
+Bartender RL Simulator
++++++++++++++++++++++++
+
+.. automodule:: simulators.bartender_sim_discrete_rl
+    :members:
+    :show-inheritance:

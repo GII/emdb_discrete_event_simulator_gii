@@ -403,7 +403,8 @@ class FruitShopSim(Node):
 
     def reward_place_fruit_goal(self):
         """
-        Gives a reward of 1.0 if the fruit is placed in the center of the table.
+        Gives a reward of 1.0 if the fruit is placed in the center of the table. This only applies between stage0 and
+        stage1: in the other stages, the reward is always 1.0.
         """
         reward = 0.0 
         if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
@@ -484,9 +485,10 @@ class FruitShopSim(Node):
 
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received: it updates the iteration and the reward sensor. Only the "end" command has another
+        effect, since world resets arrive through the world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")

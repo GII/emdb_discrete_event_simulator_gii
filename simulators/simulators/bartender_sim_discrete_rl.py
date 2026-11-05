@@ -1,3 +1,5 @@
+"""Discrete event simulator of the bartender experiment with Cartesian positions, clients with preferences and a curriculum: the simulation logic (``BartenderSim``) and its ROS 2 node (``BartenderSimNode``)."""
+
 import os
 import math
 
@@ -30,24 +32,54 @@ from core.utils import class_from_classname, resolve_seed
 DEFAULT_PERCEPTION_PERIOD = 0.01
 
 
+# BartenderSim v2. Key fixes vs the original simulator:
+# 1. reset_world: if→elif chains; no silent fall-through
+# 2. ask_nicely: stable non-trivial per-client preferences (not pref=client_id)
+# 3. place_glass at prep: cleans drink (replaces discard_drink_policy)
+# 4. place_glass at serv: only marks served if drink matches preference
+# 5. pick_glass: can always pick up used glass (for return)
+# 6. place_bottle: only repositions the returned bottle, not all bottles
+# 7. change_position: instant teleport
+# 8. Reward hierarchy: fixed perverse incentive (wrong drink + bottle was > wrong drink)
+# 9. n_bottles configurable
+# 10. is_in_transit() exposed
 class BartenderSim:
     """
-    BartenderSim v2 - Fixed + improved discrete simulator.
+    Discrete simulator of the bartender experiment: pure simulation logic, without ROS communication.
 
-    Key fixes vs original:
-      1. reset_world: if→elif chains; no silent fall-through
-      2. ask_nicely: stable non-trivial per-client preferences (not pref=client_id)
-      3. place_glass at prep: cleans drink (replaces discard_drink_policy)
-      4. place_glass at serv: only marks served if drink matches preference
-      5. pick_glass: can always pick up used glass (for return)
-      6. place_bottle: only repositions the returned bottle, not all bottles
-      7. change_position: instant teleport
-      8. Reward hierarchy: fixed perverse incentive (wrong drink + bottle was > wrong drink)
-      9. n_bottles configurable
-     10. is_in_transit() exposed
+    The robot has two hands: the left one holds the glass and the right one holds a bottle. It works at two tables, the preparation table (position id 0) and the serving table (position id 1), and moves between them instantly. The bottles and the glass have Cartesian coordinates x and y, and the preparation area (``prep_area``) and the serving area (``serv_area``) are rectangles.
+
+    A client asks for a drink type and may like it shaken. The preference of the client is not known by the agent until it executes ``ask_nicely_policy``. An episode is finished (``finished_signal``) when the correct drink has been served and the used glass has been cleaned.
+
+    The world changes only through the policies: ``shake_glass``, ``pick_glass``, ``place_glass``, ``prepare_drink``, ``change_position``, ``pick_bottle``, ``place_bottle`` and ``ask_nicely``, which are the methods named ``<name>_policy``.
+
+    **Curriculum.** The initial state of each episode is sampled by ``generate_world`` from the probabilities of the curriculum selected in ``current_curriculum``. The available curricula are ``balanced`` (the default), ``help`` and ``benchmark``. Each one has a section ``serving`` and a section ``preparing``, used when the robot starts at the serving or at the preparation table, with these probabilities:
+
+    - ``bottle_at_serv``: each bottle is placed in the serving area instead of the preparation area.
+    - ``grasped_bottle``: the right hand starts holding a bottle.
+    - ``correct_bottle``: the bottle held is the one the client prefers.
+    - ``grasped_glass``: the left hand starts holding the glass.
+    - ``glass_at_serv``: the glass is placed in the serving area instead of the preparation area.
+    - ``empty_glass``: the glass starts empty.
+    - ``correct_drink``: the drink in a glass that is not empty is the one the client wants.
+    - ``used_glass``: the glass starts already used.
     """
 
     def __init__(self, random_seed=0, n_bottles=3, single_client=True, random_preferences=False):
+        """
+        Constructor of the BartenderSim simulator class.
+
+        It creates the random number generator, the clients, the areas and positions of the tables, the bottles and the glass. The state of the episode is set by ``reset_world``.
+
+        :param random_seed: Seed of the random number generator. A value of 0 or None selects a random seed.
+        :type random_seed: int
+        :param n_bottles: Number of bottles. Their drink types are numbered from 1 to ``n_bottles``.
+        :type n_bottles: int
+        :param single_client: If True, there is only the client 1, who prefers the drink type 2 and likes it shaken. If False, there are three clients.
+        :type single_client: bool
+        :param random_preferences: Only used when ``single_client`` is False. If True, the preferred drink type and the taste for shaken drinks of the three clients are random (derived from the seed). If False, they are fixed: the client 1 prefers the drink type 1, the client 2 the drink type 2 shaken and the client 3 the drink type 3.
+        :type random_preferences: bool
+        """
         self.random_seed = resolve_seed(random_seed)
         self.rng = numpy.random.default_rng(self.random_seed)
         self.n_bottles = n_bottles
@@ -196,7 +228,12 @@ class BartenderSim:
         return int(self.glass["drink_type"]) != int(self.client["preference"]) or (self.glass["is_shaken"] and not self.client["likes_shake"])
 
     def is_client_preference_known(self):
-        """Whether client preference is known to the agent in the current episode."""
+        """
+        Check whether the preference of the client is known by the agent in the current episode.
+
+        :return: True if the agent has asked for the preference with ``ask_nicely_policy``.
+        :rtype: bool
+        """
         return bool(self.client["preference_known"])
 
     def _make_client_state(self, client_id, preference_known=False):
@@ -258,13 +295,27 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def random_position(self, area):
-        """Generate a random position within the specified area."""
+        """
+        Generate a random position within the specified area.
+
+        :param area: The area where the position should be generated. It must have the keys ``x_min``, ``x_max``, ``y_min`` and ``y_max``.
+        :type area: dict
+        :return: A tuple with the coordinates (x, y) of the position, drawn uniformly inside the area.
+        :rtype: tuple
+        """
         x = self.rng.uniform(low=area["x_min"], high=area["x_max"])
         y = self.rng.uniform(low=area["y_min"], high=area["y_max"])
         return float(x), float(y)
 
     def generate_bottles(self, area=None):
-        """Generate bottles with random positions."""
+        """
+        Generate the bottles with random positions.
+
+        The bottles replace the previous ones. There are ``n_bottles`` bottles, each one a dictionary with its ``x``, its ``y`` and its ``drink_type`` (from 1 to ``n_bottles``).
+
+        :param area: Area where the bottles are placed. If None, the preparation area is used.
+        :type area: dict
+        """
         if area is None:
             area = self.prep_area
         self.bottles = []
@@ -273,7 +324,22 @@ class BartenderSim:
             self.bottles.append(dict(x=x, y=y, drink_type=i))
 
     def generate_glass(self, area=None, state=False, drink_type=0.0, was_used=False, is_shaken=False):
-        """Generate a glass at a random position inside the preparation area."""
+        """
+        Generate the glass at a random position inside an area.
+
+        The glass replaces the previous one. It is a dictionary with its ``x``, its ``y``, ``state`` (whether it contains a drink), ``drink_type``, ``was_used`` and ``is_shaken``.
+
+        :param area: Area where the glass is placed. If None, the preparation area is used.
+        :type area: dict
+        :param state: Whether the glass contains a drink.
+        :type state: bool
+        :param drink_type: Type of the drink in the glass (0.0 if it is empty).
+        :type drink_type: float
+        :param was_used: Whether the glass has already been used.
+        :type was_used: bool
+        :param is_shaken: Whether the drink in the glass has been shaken.
+        :type is_shaken: bool
+        """
         # Place the glass at a random position inside the preparation area
         # so episodes vary spatially like the bottles.
         if area is None:
@@ -381,7 +447,11 @@ class BartenderSim:
             self._set_gripper_object(self.left_hand, self.glass)
 
     def generate_world(self):
-        "Generates a new world state based on the curriculum. Prevents rewarded states from being generated."
+        """
+        Generate a new world state based on the curriculum.
+
+        The state is sampled from the curriculum again until it is not a state that would already be rewarded. Those states are the ones where the glass contains the drink that the client wants and is in the serving area, and the ones where a used glass is in the preparation area.
+        """
         correct_drink_served = True
         glass_to_be_cleaned = True
 
@@ -399,14 +469,24 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def get_bottles_state(self):
-        """Get the current state of all bottles."""
+        """
+        Get the current state of all the bottles.
+
+        :return: A list with a dictionary per bottle, with the keys ``x`` (float), ``y`` (float) and ``drink_type`` (int). The list is empty if there are no bottles.
+        :rtype: list
+        """
         return [
             {"x": float(b["x"]), "y": float(b["y"]), "drink_type": int(b["drink_type"])}
             for b in self.bottles
         ] if self.bottles else []
 
     def get_glass_state(self):
-        """Get the current state of the glass."""
+        """
+        Get the current state of the glass.
+
+        :return: A dictionary with the keys ``x`` (float), ``y`` (float), ``state`` (bool, whether the glass contains a drink), ``drink_type`` (float), ``was_used`` (bool) and ``is_shaken`` (bool). If there is no glass, the coordinates and the drink type are 0.0 and the flags are False.
+        :rtype: dict
+        """
         if not self.glass:
             return {"x": 0.0, "y": 0.0, "state": False, "drink_type": 0.0, "was_used": False, "is_shaken": False}
         return {
@@ -419,7 +499,12 @@ class BartenderSim:
         }
 
     def get_robot_state(self):
-        """Get the current state of the robot."""
+        """
+        Get the current state of the robot.
+
+        :return: A dictionary with the keys ``position_id`` (int, 0 at the preparation table and 1 at the serving table), ``x`` (float), ``y`` (float) and ``orientation`` (float, in degrees).
+        :rtype: dict
+        """
         return {
             "position_id": int(self.robot.get("position_id", -1)),
             "x": float(self.robot.get("x", 0.0)),
@@ -428,7 +513,12 @@ class BartenderSim:
         }
 
     def get_hands_state(self):
-        """Get the current state of the robot's hands."""
+        """
+        Get the current state of the hands of the robot.
+
+        :return: A dictionary with the keys ``left_hand`` and ``right_hand``. Each one is a dictionary with ``used`` (bool) and ``contents``, a copy of the object that the hand holds (empty if the hand is free).
+        :rtype: dict
+        """
         return {
             "left_hand": {
                 "used": bool(self.left_hand["used"]),
@@ -445,9 +535,21 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def is_at_preparation_table(self):
+        """
+        Check whether the robot is at the preparation table.
+
+        :return: True if the position id of the robot is 0.
+        :rtype: bool
+        """
         return int(self.robot.get("position_id", -1)) == 0
 
     def is_at_serving_table(self):
+        """
+        Check whether the robot is at the serving table.
+
+        :return: True if the position id of the robot is 1.
+        :rtype: bool
+        """
         return int(self.robot.get("position_id", -1)) == 1
 
     def _is_point_in_area(self, x, y, area):
@@ -458,9 +560,25 @@ class BartenderSim:
         )
 
     def obj_is_in_serving_position(self, obj):
+        """
+        Check whether an object is inside the serving area.
+
+        :param obj: The object, a dictionary with the keys ``x`` and ``y``.
+        :type obj: dict
+        :return: True if the object exists and its coordinates are inside the serving area.
+        :rtype: bool
+        """
         return bool(obj) and self._is_point_in_area(obj["x"], obj["y"], self.serv_area)
 
     def obj_is_in_preparation_area(self, obj):
+        """
+        Check whether an object is inside the preparation area.
+
+        :param obj: The object, a dictionary with the keys ``x`` and ``y``.
+        :type obj: dict
+        :return: True if the object exists and its coordinates are inside the preparation area.
+        :rtype: bool
+        """
         return bool(obj) and self._is_point_in_area(obj["x"], obj["y"], self.prep_area)
 
     # ------------------------------------------------------------------ #
@@ -468,7 +586,14 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def reset_world(self, client_ids=None):
-        """Reset the world to a new random state."""
+        """
+        Reset the world to a new random state.
+
+        The client is chosen first: it is always the client 1 when ``single_client`` is True, and a random one otherwise. Its preference is not known by the agent. Then the state of the robot, the hands, the bottles and the glass is generated with ``generate_world``.
+
+        :param client_ids: Identifiers of the clients that can be chosen. If None, the clients 1, 2 and 3 can be chosen. It is ignored if ``single_client`` is True.
+        :type client_ids: tuple
+        """
         if self.single_client:
             # Single Client (by default 1)
             cid = 1
@@ -486,7 +611,11 @@ class BartenderSim:
     # ------------------------------------------------------------------ #
 
     def shake_glass_policy(self):
-        """Shake the glass to mix the drink."""
+        """
+        Shake the glass to mix the drink.
+
+        It requires the left hand to hold the glass, the glass to contain a drink and the drink not to be shaken yet; otherwise nothing happens. The drink is marked as shaken.
+        """
         # Require: glass in hand, glass exists, glass has a drink (state==True),
         # glass not already used, and not already shaken.
         if (
@@ -498,7 +627,11 @@ class BartenderSim:
         self.glass.update({"is_shaken": True})
 
     def pick_glass_policy(self):
-        """Pick glass from prep or serving table."""
+        """
+        Pick the glass from the preparation or the serving table.
+
+        Nothing happens if the left hand already holds the glass. Otherwise, the left hand picks the glass if the robot is at the preparation table and the glass is in the preparation area, or if the robot is at the serving table and the glass is in the serving area.
+        """
         if self.left_hand["contents"] == self.glass:
             return
         
@@ -508,10 +641,12 @@ class BartenderSim:
 
     def place_glass_policy(self):
         """
-        Place glass in context-appropriate location.
-        - At serving table: places glass; marks served if drink matches preference.
-        - At prep table: places glass AND cleans it (state=False, drink_type=0).
-          This is the only way to clear a wrong drink — bring it back to prep.
+        Place the glass in a location that depends on where the robot is.
+
+        It requires the left hand to hold the glass; otherwise nothing happens.
+
+        - At the serving table, the glass is left at the serving position. If the drink matches the preference of the client (drink type and shaken or not), the drink is considered served: the glass is marked as used and becomes empty.
+        - At the preparation table, the glass is left at a random position of the preparation area. If the glass was used or the drink is wrong (wrong type, or shaken when the client does not like it), the glass is cleaned: it becomes empty and not used. Cleaning a used glass is what counts as returning it.
         """
         if self.left_hand["contents"] != self.glass:
             return
@@ -546,7 +681,11 @@ class BartenderSim:
                 })
 
     def prepare_drink_policy(self):
-        """Prepare drink if holding glass (empty, unused) and bottle."""
+        """
+        Prepare the drink in the glass.
+
+        It requires both hands to be occupied and the glass to be empty; otherwise nothing happens. The glass is filled with the drink type of the bottle in the right hand, not shaken.
+        """
         # Holding both glass and bottle
         if not self.left_hand["used"] or not self.right_hand["used"]:
             return
@@ -560,7 +699,11 @@ class BartenderSim:
         self.glass.update({"state": True, "drink_type": drink_type, "is_shaken": False})
 
     def change_position_policy(self):
-        """Instant teleport between prep and serving tables."""
+        """
+        Move the robot instantly to the other table.
+
+        The robot goes from the preparation table to the serving table, and from the serving table to the preparation table. The objects in its hands move with it.
+        """
         if self.is_at_preparation_table():
             self._set_robot_position("serv")
         else:
@@ -568,7 +711,16 @@ class BartenderSim:
         
 
     def pick_bottle_policy(self, bottle_id=None):
-        """Pick bottle by agent choice, fallback to client preference, then first available."""
+        """
+        Pick a bottle with the right hand.
+
+        The bottle is picked if it is on the same table where the robot is: in the preparation area when the robot is at the preparation table, or in the serving area when it is at the serving table. Otherwise the hand stays empty.
+
+        :param bottle_id: Drink type of the bottle to pick.
+        :type bottle_id: int
+        :return: True if the right hand was already occupied, if ``bottle_id`` is None or 0, or if a bottle with that drink type exists (even if it was not within reach). False if there is no bottle with that drink type.
+        :rtype: bool
+        """
         if self.right_hand["used"] or not bottle_id:
             return True
         bottle = None
@@ -583,7 +735,11 @@ class BartenderSim:
         return True
 
     def place_bottle_policy(self):
-        """Place the held bottle back to a random position in the prep area."""
+        """
+        Place the held bottle at a random position of the table where the robot is.
+
+        It requires the right hand to hold a bottle; otherwise nothing happens. The position is chosen inside the preparation area if the robot is at the preparation table and inside the serving area otherwise.
+        """
         if not self.right_hand["used"]:
             return
         area = self.prep_area if self.is_at_preparation_table() else self.serv_area
@@ -593,7 +749,9 @@ class BartenderSim:
 
     def ask_nicely_policy(self):
         """
-        Ask client for preference.
+        Ask the client for the preference.
+
+        From now on, the preference of the client is known by the agent in the current episode.
         """
         self.client["preference_known"] = True
 
@@ -603,8 +761,12 @@ class BartenderSim:
 
     def get_progress_goal(self):
         """
-        Shaped reward reflecting task progress.
-        Ordered strictly by achievement level; no perverse incentives.
+        Calculate the reward of the progress of the task.
+
+        The shaped reward of progress has not been migrated yet to the Cartesian representation of this simulator, so the reward is always 0.0.
+
+        :return: The reward.
+        :rtype: float
         """
         # TODO: MIGRATE
 
@@ -666,7 +828,12 @@ class BartenderSim:
         return float(reward)
 
     def get_serve_the_drink_goal(self):
-        """Reward = 1.0 when correct drink is served."""
+        """
+        Calculate the reward of the goal of serving the drink.
+
+        :return: 1.0 if the glass is marked as used, which happens when the correct drink is served, and 0.0 otherwise.
+        :rtype: float
+        """
         glass_state = self.get_glass_state()
         client_state = self.client.get("id", 0)
         if not glass_state["was_used"] and client_state:
@@ -675,7 +842,14 @@ class BartenderSim:
             return 1.0
 
     def get_return_the_glass_goal(self):
-        """Reward = 1.0 once per episode when used glass returns to prep."""
+        """
+        Calculate the reward of the goal of returning the glass.
+
+        The goal is reached once, in an episode, when the used glass is returned to the preparation table and cleaned.
+
+        :return: 1.0 if the goal is reached and 0.0 otherwise.
+        :rtype: float
+        """
         glass_state=self.get_glass_state()
         if glass_state["was_used"]:
             return 0.0
@@ -683,7 +857,12 @@ class BartenderSim:
             return 1.0
 
     def finished_signal(self):
-        """Check if the episode is finished based on the current state."""
+        """
+        Check whether the episode is finished.
+
+        :return: True if the correct drink has been served and the used glass has been cleaned at the preparation table.
+        :rtype: bool
+        """
         return self.correct_drink_served and self.glass_was_cleaned
 
 
@@ -693,11 +872,41 @@ class BartenderSim:
 
 class BartenderSimNode(Node):
     """
-    ROS2 Node wrapper for BartenderSim.
-    Handles all ROS communication; pure logic lives in BartenderSim.
+    ROS 2 node wrapper for BartenderSim.
+
+    It handles all the ROS communication; the logic of the simulation lives in BartenderSim. The node is named ``BartenderSim`` and has the parameters:
+
+    - ``random_seed``: seed of the random number generator (0 selects a random seed).
+    - ``config_file``: path of the YAML experiment configuration file.
+    - ``single_client``: if True, there is only one client (default False).
+    - ``random_preferences``: if True, the preferences of the clients are random (default False).
+
+    **Topics and services.** The node creates the following from the configuration file:
+
+    - A subscription to the control topic, whose messages have the iteration and a command. The iteration is stored, the reward sensors are updated and the stage is updated. The command ``end`` shuts the node down.
+    - A publisher for each perception, on its own topic.
+    - A service to execute a policy (``executed_policy_service``). The request contains the name of the policy in ``policy`` and the perception in ``perception``, and the response ``success`` is always True. A timer republishes all the perceptions every ``perception_period`` seconds while this service exists.
+    - A service to reset the world (``world_reset_service``).
+
+    It is also a client of the service ``commander/load_experiment``, which it calls once the configuration is loaded to make the commander load the same file.
+
+    **Configuration file.** The node reads these sections of the YAML file:
+
+    - ``DiscreteEventSimulator``/``perception_period``: optional period, in seconds, of the timer that republishes the perceptions. The default is 0.01. It is stored in the attribute ``perception_period``.
+    - ``DiscreteEventSimulator``/``Stages``: dictionary from the name of each stage to the iteration where it starts. The stage ``stage0`` selects the curriculum ``help``, ``stage1`` the curriculum ``balanced`` and ``stage2`` the curriculum ``benchmark``.
+    - ``DiscreteEventSimulator``/``ClientStages``: optional dictionary from the name of each client stage to the iteration where it starts. It is used only when there are several clients: during ``client_stage0``, ``client_stage1`` and ``client_stage2`` the clients 1 and 2 appear, during ``client_stage3`` only the client 3, and the three clients otherwise.
+    - ``DiscreteEventSimulator``/``Perceptions``: list of perceptions, each one with ``name``, ``perception_topic`` and ``perception_msg`` (the class name of the message). The perceptions ``bottles``, ``glass``, ``client``, ``robot_position``, ``glass_in_left_hand`` and ``bottle_in_right_hand`` are required. The reward sensors ``progress_goal``, ``serve_the_drink_goal``, ``return_the_glass_goal`` and ``finished_signal`` are optional. A message whose class name contains ``List`` is published as a list of messages, one that ends with ``BottleMsg`` as a structured message, one whose name contains ``Float`` as a float and any other one as a boolean.
+    - ``Control``: ``id``, ``control_topic``, ``control_msg`` and, optionally, ``executed_policy_service`` with ``executed_policy_msg`` and ``world_reset_service`` with ``world_reset_msg``.
+
+    The perceptions of positions are relative to the robot: the distance and the angle (in degrees, between -180 and 180, relative to the orientation of the robot) of each object, and its x and y coordinates with respect to the robot.
     """
 
     def __init__(self):
+        """
+        Constructor of the BartenderSimNode class.
+
+        Declares the parameters, creates the BartenderSim simulator and the client of the commander service. The topics, services and perceptions are created later, by ``load_configuration``.
+        """
         super().__init__("BartenderSim")
 
         self.ident = None
@@ -755,7 +964,9 @@ class BartenderSimNode(Node):
 
     def perceive_bottles(self):
         """
-        Update the perception of bottles based on the simulator state.
+        Update the bottles perception based on the simulator state.
+
+        The perception contains a message for each bottle, with its distance and angle to the robot, its drink type and its x and y coordinates relative to the robot. If there are no bottles, it contains a single message with the default values.
         """
         # Read states from simulator
         robot_state = self.simulator.get_robot_state()
@@ -779,7 +990,9 @@ class BartenderSimNode(Node):
 
     def perceive_glass(self):
         """
-        Update the perception of the glass based on the simulator state.
+        Update the glass perception based on the simulator state.
+
+        The perception contains a single message with the distance and angle to the robot, the x and y coordinates relative to the robot, and the state, drink type, used flag and shaken flag of the glass.
         """
         # Read states from simulator
         robot_state = self.simulator.get_robot_state()
@@ -803,7 +1016,9 @@ class BartenderSimNode(Node):
 
     def perceive_client(self):
         """
-        Update the perception of the client based on the simulator state.
+        Update the client perception based on the simulator state.
+
+        The perception contains a single message with the id of the client. The preference and the taste for shaken drinks are only given when the agent knows the preference of the client; otherwise they are 0 and False. If the message has the field ``preference_known``, it is also filled.
         """
         self.perceptions["client"].data = []
         client_msg = self.base_messages["client"]()
@@ -815,6 +1030,11 @@ class BartenderSimNode(Node):
         self.perceptions["client"].data.append(client_msg)
 
     def update_perceptions_from_simulator(self):
+        """
+        Update all the perceptions from the simulator state.
+
+        This updates the bottles, the glass and the client, the position of the robot (0.0 at the preparation table and 0.95 at the serving table) and the hands. For each hand, the perception tells whether it is occupied, with the kind of object (``glass`` or ``bottle``) and its drink type in ``contents`` and ``contents_id``.
+        """
         self.perceive_bottles()
         self.perceive_glass()
         self.perceive_client()
@@ -855,7 +1075,16 @@ class BartenderSimNode(Node):
     @staticmethod
     def get_relative_angle_to_robot(robot_xy, target_xy, robot_orientation):
         """
-        Return the target angle normalized into the robot frame.
+        Return the angle of a target in the frame of the robot.
+
+        :param robot_xy: Tuple with the coordinates of the robot (x, y).
+        :type robot_xy: tuple
+        :param target_xy: Tuple with the coordinates of the target (x, y).
+        :type target_xy: tuple
+        :param robot_orientation: Orientation of the robot, in degrees.
+        :type robot_orientation: float
+        :return: Angle of the target relative to the orientation of the robot, in degrees, normalized to the range [-180, 180).
+        :rtype: float
         """
         return float(
             ((BartenderSimNode.get_relative_angle(robot_xy, target_xy) - robot_orientation + 180.0) % 360.0) - 180.0
@@ -880,6 +1109,14 @@ class BartenderSimNode(Node):
     # ------------------------------------------------------------------ #
 
     def reset_world(self, data=None):
+        """
+        Reset the world to a new state.
+
+        The simulator is reset, using the clients of the current client stage when there are several clients. Then the perceptions and the reward sensors are updated and published.
+
+        :param data: Request of the reset service. It is not used.
+        :type data: object
+        """
         self.get_logger().info("Resetting world...")
         client_ids = None
         if not self.single_client:
@@ -892,7 +1129,11 @@ class BartenderSimNode(Node):
         self._log_simulator_state()
 
     def update_stage(self):
-        """Update the stage perception based on the current iteration."""
+        """
+        Update the stage and the curriculum based on the current iteration.
+
+        The current stage and client stage are the last ones, in the order of the configuration, whose start iteration has been reached. The stages ``stage0``, ``stage1`` and ``stage2`` select the curricula ``help``, ``balanced`` and ``benchmark`` of the simulator.
+        """
 
         for stage, start_iter in self.change_stage_iterations.items():
             if self.iteration >= int(start_iter):
@@ -923,6 +1164,11 @@ class BartenderSimNode(Node):
         return (1, 2, 3)
 
     def update_reward_sensor(self):
+        """
+        Update the goal sensors' values from the simulator.
+
+        Only the sensors present in the configured perceptions (``progress_goal``, ``serve_the_drink_goal``, ``return_the_glass_goal`` and ``finished_signal``) are updated.
+        """
         if "progress_goal" in self.perceptions:
             progress = self.simulator.get_progress_goal()
             self.perceptions["progress_goal"].data = progress
@@ -938,6 +1184,7 @@ class BartenderSimNode(Node):
             self.get_logger().info(f"Finished signal: {self.perceptions['finished_signal'].data}")
 
     def publish_perceptions(self):
+        """Publish the current perceptions to the corresponding topics."""
         # The debug texts are built only if they are going to be logged: perceptions are published every period
         debug = self.get_logger().is_enabled_for(LoggingSeverity.DEBUG)
         for ident, publisher in self.sim_publishers.items():
@@ -963,7 +1210,18 @@ class BartenderSimNode(Node):
     # ------------------------------------------------------------------ #
 
     def execute_policy(self, policy_name, perception):
-        """Execute a policy by name and update tracking state."""
+        """
+        Execute a policy by name.
+
+        The policy is the method ``<policy_name>_policy`` of the node, which is called with the perception.
+
+        :param policy_name: Name of the policy, without the ``_policy`` suffix.
+        :type policy_name: str
+        :param perception: Perception sent with the request of the policy.
+        :type perception: object
+        :return: True if the policy exists and was executed, False otherwise.
+        :rtype: bool
+        """
         method = getattr(self, policy_name + "_policy", None)
         if method and callable(method):
             method(perception=perception)
@@ -971,27 +1229,59 @@ class BartenderSimNode(Node):
         return False
 
     def shake_glass_policy(self, perception=None):
-        """Shake the glass to mix the drink."""
+        """
+        Shake the glass to mix the drink.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.shake_glass_policy()
 
     def pick_glass_policy(self, perception=None):
-        """Pick glass from prep or serving table."""
+        """
+        Pick the glass from the preparation or the serving table.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.pick_glass_policy()
 
     def place_glass_policy(self, perception=None):
-        """Place glass in context-appropriate location."""
+        """
+        Place the glass in a location that depends on where the robot is.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.place_glass_policy()
 
     def prepare_drink_policy(self, perception=None):
-        """Prepare drink if holding glass (empty, unused) and bottle."""
+        """
+        Prepare the drink if the robot holds the glass (empty) and a bottle.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.prepare_drink_policy()
 
     def change_position_policy(self, perception=None):
-        """Instant teleport between prep and serving tables."""
+        """
+        Move the robot instantly between the preparation and the serving tables.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.change_position_policy()
 
     def pick_bottle_policy(self, perception=None):
-        """Pick bottle by agent choice, fallback to client preference, then first available."""
+        """
+        Pick the bottle indicated in the perception.
+
+        The drink type of the bottle is read from the feature ``bottles:drink_type`` of the perception (its last value). That value is scaled by the number of bottles plus one to obtain the drink type, except when it is close to 0.98, which selects the last bottle.
+
+        :param perception: Perception sent with the request, as a message that can be converted into a container.
+        :type perception: object
+        """
         perception = Container.from_msg(perception)
         bottle_id_raw = perception.read().sel(features=["bottles:drink_type"]).values[-1]
         bottle_id = int(bottle_id_raw*(self.simulator.n_bottles+1)) if not math.isclose(bottle_id_raw, 0.98) else self.simulator.n_bottles 
@@ -1000,11 +1290,21 @@ class BartenderSimNode(Node):
             self.get_logger().error(f"Picked bottle with id {bottle_id} not found in the simulator state.")
 
     def place_bottle_policy(self, perception=None):
-        """Place the held bottle back to a random position in the prep area."""
+        """
+        Place the held bottle at a random position of the table where the robot is.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.place_bottle_policy()
 
     def ask_nicely_policy(self, perception=None):
-        """Ask client for preference."""
+        """
+        Ask the client for the preference.
+
+        :param perception: Perception sent with the request. It is not used.
+        :type perception: object
+        """
         self.simulator.ask_nicely_policy()
 
     # ------------------------------------------------------------------ #
@@ -1012,11 +1312,29 @@ class BartenderSimNode(Node):
     # ------------------------------------------------------------------ #
 
     def world_reset_service_callback(self, request, response):
+        """
+        Callback for the world reset service.
+
+        :param request: Request of the service.
+        :type request: object
+        :param response: Response of the service. Its field ``success`` is set to True.
+        :type response: object
+        :return: The response.
+        :rtype: object
+        """
         self.reset_world(request)
         response.success = True
         return response
 
     def new_command_callback(self, data):
+        """
+        Process a command received in the control topic.
+
+        The iteration of the message is stored, and the reward sensors and the stage are updated. If the command is ``end``, the node shuts down.
+
+        :param data: Control message, with the fields ``iteration`` and ``command``.
+        :type data: object
+        """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.iteration = data.iteration
 
@@ -1028,6 +1346,18 @@ class BartenderSimNode(Node):
             rclpy.shutdown()
 
     def new_action_service_callback(self, request, response):
+        """
+        Execute a policy and publish the new perceptions.
+
+        The policy ``request.policy`` is executed with ``request.perception``, and the perceptions are updated before and after. A policy that does not exist does not change the world. Then the reward sensors are updated and all the perceptions are published.
+
+        :param request: Request of the service, with the name of the policy in ``policy`` and the perception in ``perception``.
+        :type request: object
+        :param response: Response of the service. Its field ``success`` is set to True.
+        :type response: object
+        :return: The response.
+        :rtype: object
+        """
         self.get_logger().info(f"Executing policy {request.policy}")
         self.get_logger().info(f"ITERATION: {self.iteration}")
 
@@ -1057,14 +1387,34 @@ class BartenderSimNode(Node):
     # ------------------------------------------------------------------ #
 
     def setup_experiment_stages(self, stages):
+        """
+        Set up the stages of the experiment with their corresponding iterations.
+
+        :param stages: Dictionary from the name of each stage to the iteration where it starts.
+        :type stages: dict
+        """
         for stage in stages:
             self.change_stage_iterations[stage] = stages[stage]
 
     def setup_client_stages(self, stages):
+        """
+        Set up the client stages of the experiment with their corresponding iterations.
+
+        :param stages: Dictionary from the name of each client stage to the iteration where it starts.
+        :type stages: dict
+        """
         for stage in stages:
             self.change_client_stage_iterations[stage] = stages[stage]
 
     def setup_perceptions(self, perceptions):
+        """
+        Configure the ROS topics where the simulator will publish the perceptions.
+
+        For each perception, the message is created with an initial value that depends on its class name, and a publisher is created in its topic.
+
+        :param perceptions: List of dictionaries with the keys ``name``, ``perception_topic`` and ``perception_msg``.
+        :type perceptions: list
+        """
         for perception in perceptions:
             sid = perception["name"]
             topic = perception["perception_topic"]
@@ -1090,6 +1440,14 @@ class BartenderSimNode(Node):
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
 
     def setup_control_channel(self, simulation):
+        """
+        Configure the ROS topic and the services where the node listens for commands to be executed.
+
+        The timer that republishes the perceptions uses ``perception_period``, which is set by ``load_configuration``.
+
+        :param simulation: The ``Control`` section of the configuration file.
+        :type simulation: dict
+        """
         self.ident = simulation["id"]
         topic = simulation["control_topic"]
         classname = simulation["control_msg"]
@@ -1122,9 +1480,20 @@ class BartenderSimNode(Node):
             )
 
     def load_experiment_file_in_commander(self):
+        """
+        Load the configuration file in the commander node.
+
+        :return: The result of the request to the service ``commander/load_experiment``.
+        :rtype: object
+        """
         return self.load_client.send_request(file=self.config_file)
 
     def load_configuration(self):
+        """
+        Load the configuration file and set up the simulator.
+
+        If no configuration file is given or it does not exist, an error is logged and ROS is shut down. Otherwise, the period of the perceptions, the stages, the client stages, the perceptions and the control channel are set up from the file, and the file is loaded in the commander node.
+        """
         if not self.config_file:
             self.get_logger().error("No configuration file specified!")
             rclpy.shutdown()
@@ -1152,6 +1521,14 @@ class BartenderSimNode(Node):
 # ======================================================================== #
 
 def main(args=None):
+    """
+    Run the bartender simulator node.
+
+    The node is spun with an events executor if it is available, and with a single-threaded executor otherwise, until the node is shut down or interrupted from the keyboard.
+
+    :param args: Command line arguments for ROS.
+    :type args: list
+    """
     rclpy.init(args=args)
     sim = BartenderSimNode()
     sim.load_configuration()

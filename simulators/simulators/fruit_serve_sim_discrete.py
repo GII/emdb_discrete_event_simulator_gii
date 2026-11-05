@@ -1,3 +1,5 @@
+"""Discrete event simulator of the fruit serving task of the TIAGo robot, as a ROS 2 node (``FruitServeSim``)."""
+
 import os
 
 import numpy
@@ -21,9 +23,40 @@ from core_interfaces.srv import LoadConfig
 
 
 class FruitServeSim(Node):
-    """Discrete simulator for the TIAGo fruit serving task."""
+    """
+    Discrete simulator for the TIAGo fruit serving task, as a ROS 2 node.
+
+    The robot stands between a table and a shelf and faces one of them at a time. The fruits start on the shelf. The robot has to bring a fruit to the table, weigh it on the scale with the left hand, and put it in the delivery box with the right hand. The scale and the box are on the table. The position of the objects is given as a distance and an angle with respect to the robot.
+
+    The world changes through the policies, which are the methods named ``<name>_policy``: ``pick_fruit``, ``place_fruit``, ``place_in_box``, ``change_hands``, ``give_fruit``, ``turn_around``, ``weigh_fruit`` and ``discard_fruit``. Each one returns whether it could be executed.
+
+    The node is named ``FruitServeSim`` and has the parameters:
+
+    - ``random_seed``: seed of the random number generator (0 selects a random seed).
+    - ``config_file``: path of the YAML experiment configuration file.
+
+    **Topics and services.** The node creates the following from the configuration file:
+
+    - A subscription to the control topic, whose messages have the iteration and a command. The iteration is stored and the reward sensors are updated. The command ``end`` shuts the node down.
+    - A publisher for each perception, on its own topic.
+    - A service to execute a policy (``executed_policy_service``). The request contains the name of the policy in ``policy``, which must be one of the policies above, and the response ``success`` is always True. A timer republishes all the perceptions every 0.01 s while this service exists.
+    - A service to reset the world (``world_reset_service``).
+
+    It is also a client of the service ``commander/load_experiment``, which it calls once the configuration is loaded to make the commander load the same file.
+
+    **Configuration file.** The node reads these sections of the YAML file:
+
+    - ``DiscreteEventSimulator``/``Stages``: dictionary from the name of each stage to its iteration. It is stored in ``change_reward_iterations``.
+    - ``DiscreteEventSimulator``/``Perceptions``: list of perceptions, each one with ``name``, ``perception_topic`` and ``perception_msg`` (the class name of the message). The perceptions ``fruits`` (distance, angle and ``dim_max`` of the closest visible fruit) and ``scales`` (distance, angle, ``state`` and ``active``) are lists of messages. The perceptions ``fruit_in_left_hand``, ``fruit_in_right_hand``, ``holding_weighed_fruit``, ``facing_table`` and ``facing_shelf`` are boolean. All of them are required. Any perception ``<name>`` for which the node has a method ``reward_<name>`` is a reward sensor: ``progress_client_served_goal`` and ``client_served_goal``. A message whose class name contains ``List`` is published as a list of messages, one whose name contains ``Float`` as a float and any other one as a boolean.
+    - ``Control``: ``id``, ``control_topic``, ``control_msg`` and, optionally, ``executed_policy_service`` with ``executed_policy_msg`` and ``world_reset_service`` with ``world_reset_msg``.
+    """
 
     def __init__(self):
+        """
+        Constructor of the FruitServeSim class.
+
+        Declares the parameters, defines the areas and positions of the table, the shelf, the box and the human, and creates the empty state of the world and the client of the commander service. The random number generator is created, and the topics, services and perceptions are set up, by ``load_configuration``.
+        """
         super().__init__("FruitServeSim")
         self.rng = None
         self.ident = None
@@ -87,9 +120,11 @@ class FruitServeSim(Node):
         """
         Generate a random position within the specified area.
 
-        :param area: The area where the position should be generated.
+        The position is drawn uniformly inside the area and converted to a distance and an angle. It is drawn again if it is too close (less than 0.1 in distance and 0.09 in angle) to an object of the current perception of the kind of the area.
+
+        :param area: The area where the position should be generated. It must have the keys ``x_min``, ``x_max``, ``y_min`` and ``y_max``, and ``object``, the name of the perception (``fruits`` or ``scales``) whose objects are avoided.
         :type area: dict
-        :return: A tuple containing the distance and angle of the generated position.
+        :return: A tuple with the distance and the angle (in radians) of the generated position.
         :rtype: tuple
         """
         valid = False
@@ -122,7 +157,16 @@ class FruitServeSim(Node):
         }
 
     def generate_fruits(self, n_fruits, scale=None):
-        """Generate random fruits on the shelf."""
+        """
+        Generate random fruits on the shelf.
+
+        The fruits are added to the current ones. Each one has a random type among ``fruit_types``, a random position on the shelf and a random size. In addition, if a scale is given, with a probability of 0.5 one more fruit is added in one of these places chosen at random: on the table (in either of the two placing positions), in the box, with the human or on the scale. The fruit on the scale is already weighed.
+
+        :param n_fruits: Number of fruits to generate on the shelf.
+        :type n_fruits: int
+        :param scale: The scale, a dictionary with its ``distance`` and ``angle``. If None, no additional fruit is generated.
+        :type scale: dict
+        """
         self.get_logger().info("Generating fruits...")
         for _ in range(n_fruits):
             self.fruits.append(self._make_fruit(self.rng.choice(self.fruit_types)))
@@ -162,7 +206,16 @@ class FruitServeSim(Node):
             })
 
     def get_closest_visible_fruit(self, visible_locations=None):
-        """Get closest fruit in visible locations. Held fruit is always prioritized."""
+        """
+        Get the closest fruit in the visible locations.
+
+        The fruit held by the robot is always prioritized.
+
+        :param visible_locations: Locations (``location`` of the fruits) where to look for the fruit. If None, ``table`` and ``scale`` are used.
+        :type visible_locations: tuple
+        :return: The held fruit if there is one, otherwise the closest fruit in the visible locations, or None if there is no such fruit.
+        :rtype: dict
+        """
         if self.held_fruit is not None:
             return self.held_fruit
         if visible_locations is None:
@@ -174,7 +227,16 @@ class FruitServeSim(Node):
         return candidates[0]
 
     def assign_fruit_to_hand(self, fruit):
-        """Mark a fruit as being held by one hand based on its side of the table."""
+        """
+        Mark a fruit as being held by one hand, based on its side.
+
+        The right hand is used if the angle of the fruit is positive and the left hand otherwise. The location of the fruit becomes ``hand_left`` or ``hand_right``.
+
+        :param fruit: The fruit to hold.
+        :type fruit: dict
+        :return: The hand that holds the fruit, ``left`` or ``right``.
+        :rtype: str
+        """
         hand = "right" if fruit["angle"] > 0.0 else "left"
         fruit["location"] = f"hand_{hand}"
         self.held_fruit = fruit
@@ -182,13 +244,22 @@ class FruitServeSim(Node):
         return hand
 
     def clear_held_fruit(self):
+        """
+        Release the held fruit.
+
+        The robot no longer holds any fruit. The location of the fruit is not changed.
+        """
         self.held_fruit = None
         self.held_hand = None
 
     # ── Perception updates ────────────────────────────────────────────────
 
     def perceive_closest_fruit(self):
-        """Publish closest visible fruit. Visibility depends on facing direction."""
+        """
+        Update the perception of the closest visible fruit.
+
+        The visibility depends on where the robot is facing: the fruits on the table and on the scale when facing the table, and the fruits on the shelf when facing the shelf. The fruit in a hand is always visible. The perception contains a single message with the distance, angle and ``dim_max`` of the fruit. If no fruit is visible, the message contains the values 1.9, 1.4 and 0.1.
+        """
         message = self.perceptions["fruits"]
         message.data = []
         fruit_msg = self.base_messages["fruits"]()
@@ -213,10 +284,20 @@ class FruitServeSim(Node):
         message.data.append(fruit_msg)
 
     def update_hand_perceptions(self):
+        """
+        Update the perceptions of the hands.
+
+        ``fruit_in_left_hand`` and ``fruit_in_right_hand`` tell whether a fruit is held with that hand.
+        """
         self.perceptions["fruit_in_left_hand"].data = self.held_hand == "left"
         self.perceptions["fruit_in_right_hand"].data = self.held_hand == "right"
 
     def update_holding_weighed_fruit_perception(self):
+        """
+        Update the perception of holding a weighed fruit.
+
+        It is True if the robot holds a fruit that has been weighed.
+        """
         # if self.iteration <= self.change_reward_iterations.get('stage1', 0):
         #     self.perceptions["holding_weighed_fruit"].data = False
         #     return
@@ -225,12 +306,19 @@ class FruitServeSim(Node):
         )
 
     def update_facing_table_perception(self):
+        """Update the perception of facing the table."""
         self.perceptions["facing_table"].data = self.facing_table
 
     def update_facing_shelf_perception(self):
+        """Update the perception of facing the shelf."""
         self.perceptions["facing_shelf"].data = self.facing_shelf
 
     def update_scale_perception(self):
+        """
+        Update the perception of the scale.
+
+        The perception contains a single message with the ``state`` and ``active`` values of the scale and, when the robot faces the table, its distance and angle. When it faces the shelf, the scale is not visible and the distance and angle are 1.9 and 1.4.
+        """
         message = self.perceptions["scales"]
         message.data = []
         scale_msg = self.base_messages["scales"]()
@@ -252,7 +340,11 @@ class FruitServeSim(Node):
         message.data.append(scale_msg)
 
     def update_simulated_perceptions(self):
-        """Refresh all simulated sensor outputs from the current internal state."""
+        """
+        Refresh all the simulated sensor outputs from the current internal state.
+
+        This updates the closest fruit, the hands, the weighed fruit, the facing direction, the scale and the reward sensors.
+        """
         self.perceive_closest_fruit()
         self.update_hand_perceptions()
         self.update_holding_weighed_fruit_perception()
@@ -264,7 +356,14 @@ class FruitServeSim(Node):
     # ── World reset ───────────────────────────────────────────────────────
 
     def reset_world(self, _data=None):
-        """Reset the simulated world to a new randomized state."""
+        """
+        Reset the simulated world to a new randomized state.
+
+        The robot releases any fruit, and the delivered fruits and the box are cleared. A scale is placed at a random position of the weighing area, inactive. Between 2 and 4 fruits are generated on the shelf (see ``generate_fruits``). The robot faces the table or the shelf with equal probability. With a probability of 0.5 the robot starts holding the first fruit, and with a probability of 0.5 that fruit is already weighed. Finally, the perceptions are updated and published.
+
+        :param _data: Request of the reset service. It is not used.
+        :type _data: object
+        """
         self.get_logger().info("Resetting fruit serve world...")
         self.clear_held_fruit()
         self.delivered = {}
@@ -322,11 +421,29 @@ class FruitServeSim(Node):
             publisher.publish(self.perceptions[ident])
 
     def world_reset_service_callback(self, request, response):
+        """
+        Callback for the world reset service.
+
+        :param request: Request of the service.
+        :type request: object
+        :param response: Response of the service. Its field ``success`` is set to True.
+        :type response: object
+        :return: The response.
+        :rtype: object
+        """
         self.reset_world(request)
         response.success = True
         return response
 
     def new_command_callback(self, data):
+        """
+        Process a command received in the control topic.
+
+        The iteration of the message is stored and the reward sensors are updated. If the command is ``end``, the node shuts down.
+
+        :param data: Control message, with the fields ``iteration`` and ``command``.
+        :type data: object
+        """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.iteration = data.iteration
         self.update_reward_sensor()
@@ -336,6 +453,18 @@ class FruitServeSim(Node):
             rclpy.shutdown()
 
     def new_action_service_callback(self, request, response):
+        """
+        Execute a policy and publish the new perceptions.
+
+        The policy ``<request.policy>_policy`` is executed, and then all the perceptions are updated and published.
+
+        :param request: Request of the service, with the name of the policy in ``policy``.
+        :type request: object
+        :param response: Response of the service. Its field ``success`` is set to True.
+        :type response: object
+        :return: The response.
+        :rtype: object
+        """
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
         policy = getattr(self, request.policy + "_policy")
@@ -348,7 +477,14 @@ class FruitServeSim(Node):
     # ── Policies ──────────────────────────────────────────────────────────
 
     def pick_fruit_policy(self):
-        """Pick closest visible fruit, always prioritizing a fruit on the scale."""
+        """
+        Pick the closest visible fruit.
+
+        It requires the robot not to hold any fruit and to see a fruit. When facing the table, a fruit on the scale is always picked first, and otherwise the closest fruit on the table. When facing the shelf, the closest fruit on the shelf is picked. The hand is chosen by the side of the fruit (see ``assign_fruit_to_hand``). A fruit picked from the scale deactivates the scale and is considered weighed.
+
+        :return: True if a fruit was picked, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is not None:
             self.get_logger().warn("Cannot pick a fruit while already holding one.")
             return False
@@ -377,7 +513,14 @@ class FruitServeSim(Node):
         return True
 
     def place_fruit_policy(self):
-        """Place held fruit on the table. Must face table."""
+        """
+        Place the held fruit.
+
+        It requires a fruit in the hand. The fruit is left at the placing position on the side opposite to the hand that holds it (the right placing position for a fruit in the left hand and the left one for a fruit in the right hand). It is left on the table if the robot faces the table and on the shelf otherwise, and it is no longer weighed.
+
+        :return: True if the fruit was placed, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to place on the table.")
             return False
@@ -398,7 +541,14 @@ class FruitServeSim(Node):
         return True
 
     def place_in_box_policy(self):
-        """Place fruit in the delivery box. Fruit must be weighed first."""
+        """
+        Place the held fruit in the delivery box.
+
+        It requires a weighed fruit held with the right hand while facing the table. The fruit is left in the box and the task of serving the client is completed.
+
+        :return: True if the fruit was placed in the box, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to place in the box.")
             return False
@@ -431,6 +581,14 @@ class FruitServeSim(Node):
         return True
 
     def change_hands_policy(self):
+        """
+        Pass the held fruit to the other hand.
+
+        It requires a fruit in the hand whose size (``dim_max``) does not exceed the maximum opening of the gripper (``gripper_max``).
+
+        :return: True if the fruit changed hands, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to change hands.")
             return False
@@ -445,7 +603,14 @@ class FruitServeSim(Node):
         return True
 
     def give_fruit_policy(self):
-        """Give held fruit to the human."""
+        """
+        Give the held fruit to the human.
+
+        It requires a fruit in the hand.
+
+        :return: True if the fruit was given, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to give.")
             return False
@@ -457,9 +622,13 @@ class FruitServeSim(Node):
         return True
 
     def turn_around_policy(self):
-        """Turn 180 degrees to face the other side (table <-> shelf).
+        """
+        Turn 180 degrees to face the other side (table or shelf).
 
-        Keeps facing_table and facing_shelf mutually exclusive and in sync.
+        Keeps ``facing_table`` and ``facing_shelf`` mutually exclusive and in sync.
+
+        :return: True.
+        :rtype: bool
         """
         self.facing_table = not self.facing_table
         self.facing_shelf = not self.facing_shelf
@@ -468,7 +637,14 @@ class FruitServeSim(Node):
         return True
 
     def weigh_fruit_policy(self):
-        """Weigh the held fruit on the scale. Must face table. Hand must match scale side."""
+        """
+        Weigh the held fruit on the scale.
+
+        It requires a fruit that has not been weighed, held with the left hand while facing the table. The fruit is left on the scale, which becomes active. The fruit is considered weighed when it is picked up again from the scale.
+
+        :return: True if the fruit was left on the scale, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to weigh.")
             return False
@@ -495,7 +671,14 @@ class FruitServeSim(Node):
         return True
 
     def discard_fruit_policy(self):
-        """Discard the held fruit. Fruit must be weighed first."""
+        """
+        Discard the held fruit.
+
+        It requires a weighed fruit in the hand.
+
+        :return: True if the fruit was discarded, False otherwise.
+        :rtype: bool
+        """
         if self.held_fruit is None:
             self.get_logger().warn("No fruit in hand to discard.")
             return False
@@ -512,23 +695,21 @@ class FruitServeSim(Node):
 
     def reward_progress_client_served_goal(self):
         """
-        Gradual reward toward placing a weighed fruit in the delivery box.
+        Update the perception ``progress_client_served_goal``, a gradual reward toward placing a weighed fruit in the delivery box.
 
-        sequence:
-          turn_around (face shelf) → pick_fruit → turn_around (face table)
-          → [change_hands] → weigh_fruit → pick_fruit (from scale)
-          → [change_hands] → place_in_box
+        The sequence of policies is: ``turn_around`` (face the shelf), ``pick_fruit``, ``turn_around`` (face the table), optionally ``change_hands``, ``weigh_fruit``, ``pick_fruit`` (from the scale), optionally ``change_hands`` and ``place_in_box``.
 
-        Progress levels:
-          0.0   - nothing useful happening
-          0.125 - fruits available on shelf (something to pick)
-          0.25  - holding unweighed fruit, facing shelf (need to turn around)
-          0.375 - holding unweighed fruit, facing table, wrong hand for scale (need change_hands)
-          0.5   - holding unweighed fruit, facing table, left hand (ready to weigh)
-          0.625 - scale active: fruit has been weighed, waiting to be picked up
-          0.75  - holding weighed fruit, facing table, left hand (need change_hands for box)
-          0.875 - holding weighed fruit, facing table, right hand (ready to place in box)
-          1.0   - weighed fruit placed in box
+        The value of the first situation that matches is used:
+
+        - 1.0: a weighed fruit has been placed in the box.
+        - 0.875: holding a weighed fruit with the right hand, facing the table (ready to place it in the box).
+        - 0.75: holding a weighed fruit with the left hand, facing the table (it needs ``change_hands`` for the box).
+        - 0.625: holding a weighed fruit facing the shelf, or the scale is active (a fruit has been weighed and is waiting to be picked up).
+        - 0.5: holding an unweighed fruit with the left hand, facing the table (ready to weigh).
+        - 0.375: holding an unweighed fruit with the right hand, facing the table (it needs ``change_hands`` for the scale).
+        - 0.25: holding an unweighed fruit, facing the shelf (it needs ``turn_around``).
+        - 0.125: not holding a fruit, facing the shelf with fruits on it (something to pick).
+        - 0.0: any other situation.
         """
 
         progress = 0.0
@@ -569,10 +750,19 @@ class FruitServeSim(Node):
         self.perceptions["progress_client_served_goal"].data = progress
 
     def reward_client_served_goal(self):
-        """Terminal mission: 1.0 when a weighed fruit is placed in the box."""
+        """
+        Update the perception ``client_served_goal``, the terminal goal of the task.
+
+        It is 1.0 when a weighed fruit has been placed in the box and 0.0 otherwise.
+        """
         self.perceptions["client_served_goal"].data = 1.0 if self.fruit_placed_in_box else 0.0
 
     def update_reward_sensor(self):
+        """
+        Update the reward sensors.
+
+        For each configured perception ``<name>``, the method ``reward_<name>`` is called if it exists.
+        """
         for sensor in self.perceptions:
             reward_method = getattr(self, "reward_" + sensor, None)
             if callable(reward_method):
@@ -581,10 +771,24 @@ class FruitServeSim(Node):
     # ── Setup ─────────────────────────────────────────────────────────────
 
     def setup_experiment_stages(self, stages):
+        """
+        Set up the stages of the experiment with their corresponding iterations.
+
+        :param stages: Dictionary from the name of each stage to its iteration. It is stored in ``change_reward_iterations``.
+        :type stages: dict
+        """
         for stage in stages:
             self.change_reward_iterations[stage] = stages[stage]
 
     def setup_perceptions(self, perceptions):
+        """
+        Configure the ROS topics where the simulator will publish the perceptions.
+
+        For each perception, the message is created with an initial value that depends on its class name, and a publisher is created in its topic.
+
+        :param perceptions: List of dictionaries with the keys ``name``, ``perception_topic`` and ``perception_msg``.
+        :type perceptions: list
+        """
         for perception in perceptions:
             sid = perception["name"]
             topic = perception["perception_topic"]
@@ -604,6 +808,12 @@ class FruitServeSim(Node):
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
 
     def setup_control_channel(self, simulation):
+        """
+        Configure the ROS topic and the services where the node listens for commands to be executed.
+
+        :param simulation: The ``Control`` section of the configuration file.
+        :type simulation: dict
+        """
         self.ident = simulation["id"]
         topic = simulation["control_topic"]
         message = class_from_classname(simulation["control_msg"])
@@ -637,9 +847,20 @@ class FruitServeSim(Node):
             )
 
     def load_experiment_file_in_commander(self):
+        """
+        Load the configuration file in the commander node.
+
+        :return: The result of the request to the service ``commander/load_experiment``.
+        :rtype: object
+        """
         return self.load_client.send_request(file=self.config_file)
 
     def load_configuration(self):
+        """
+        Load the configuration file and set up the simulator.
+
+        The random number generator is created with the seed of the parameter. If the configuration file is not an existing file, an error is logged and ROS is shut down. Otherwise, the stages, the perceptions and the control channel are set up from the file, the world is reset and the file is loaded in the commander node.
+        """
         self.random_seed = resolve_seed(self.random_seed)
         self.rng = numpy.random.default_rng(self.random_seed)
         self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
@@ -667,6 +888,14 @@ class FruitServeSim(Node):
 
 
 def main(args=None):
+    """
+    Run the fruit serving simulator node.
+
+    The node is spun with an events executor if it is available, and with a single-threaded executor otherwise, until the node is shut down or interrupted from the keyboard.
+
+    :param args: Command line arguments for ROS.
+    :type args: list
+    """
     rclpy.init(args=args)
     sim = FruitServeSim()
     sim.load_configuration()

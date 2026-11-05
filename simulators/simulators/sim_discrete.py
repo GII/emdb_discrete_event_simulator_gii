@@ -367,7 +367,7 @@ class LTMSim(Node):
         """
         Return True if the ball is small, False if it is big. Right now, small is 0.03 and big 0.07.
 
-        :param rad: Radius of the ball.
+        :param rad: Diameter of the ball.
         :type rad: float
         :return: The value that indicates if the ball is small or not.
         :rtype: bool
@@ -417,7 +417,7 @@ class LTMSim(Node):
     
     def object_in_close_box(self, dist, ang):
         """
-        Check if there is an object inside of a box.
+        Check if there is an object inside of a box within reach of the robot.
 
         :param dist: The distance to the object.
         :type dist: float
@@ -436,7 +436,7 @@ class LTMSim(Node):
     
     def object_in_far_box(self, dist, ang):
         """
-        Check if there is an object inside of a box.
+        Check if there is an object inside of a box out of reach of the robot.
 
         :param dist: The distance to the object.
         :type dist: float
@@ -920,7 +920,7 @@ class LTMSim(Node):
         """
         Reset the world to a random state.
 
-        :param data: The message that contains the command to reset the world. It is not used.
+        :param data: The message that contains the command to reset the world. It provides the iteration and the world.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
@@ -938,9 +938,10 @@ class LTMSim(Node):
     
     def new_command_callback(self, data):
         """
-        Process a command received.
+        Process a command received. Only the "end" command has an effect: world resets arrive through the
+        world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
@@ -1072,7 +1073,8 @@ class LTMSim(Node):
 
     def load_configuration(self):
         """
-        Load configuration from a file.
+        Load configuration from a file: the sections SimulatedBaxter and Control of the experiment configuration
+        file. Then it asks the commander to load the experiment.
         """
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")

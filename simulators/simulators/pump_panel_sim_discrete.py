@@ -337,7 +337,7 @@ class PumpPanelSim(Node):
         Execute a policy and publish new perceptions.
 
         :param request: The message that contains the policy execute and its parameter.
-        :type request: ROS srv defined in the config file. It needs the policy and parameter fields, which cognitive_node_interfaces.srv.Policy does not have.
+        :type request: ROS srv defined in the config file. It has the policy and parameter fields.
         :param response: Response of the success of the execution of the action.
         :type response: ROS srv defined in the config file.
         :return: Response indicating the success of the action execution.

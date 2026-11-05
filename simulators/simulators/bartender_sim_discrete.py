@@ -763,9 +763,8 @@ class BartenderSimNode(Node):
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.simulator.iteration = data.iteration
         self.update_reward_sensor()
-        if data.command == "reset_world":
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 

@@ -921,8 +921,7 @@ class LTMSim(Node):
         Reset the world to a random state.
 
         :param data: The message that contains the command to reset the world. It is not used.
-        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or 
-            cognitive_processes_interfaces.srv.WorldReset.Request
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         self.last_reset_iteration = data.iteration
@@ -945,9 +944,8 @@ class LTMSim(Node):
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
-        if data.command == "reset_world":
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 
@@ -1046,7 +1044,7 @@ class LTMSim(Node):
         if service_world_reset:
             classname= simulation["executed_policy_msg"]
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
-            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)     
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
             
 
     def setup_perceptions(self, perceptions):

@@ -12,10 +12,15 @@ These are the available simulators, with their ROS executables:
 
 The package also includes the 2D scenarios (`simulators.scenarios_2D`) used by the 2D simulator in [emdb_experiments_gii](https://github.com/GII/emdb_experiments_gii).
 
-There are two ROS 2 packages in this repository:
+The `physics_simulators` folder holds simulators that do have physics:
+
+- **UR5e in MuJoCo** (`sim_ur5`, package `ur5_mujoco`): A UR5e arm with a magnet, a Robotiq 2F-85 or an OnRobot 2FG7 gripper has to grasp a ball and lift it. See its [README](physics_simulators/ur5_mujoco/README.md).
+
+There are three ROS 2 packages in this repository:
 
 - **simulators:** Implementation of the discrete event simulators.
 - **simulators_interfaces:** Services and messages definitions.
+- **ur5_mujoco** (in `physics_simulators`): The MuJoCo UR5e simulator.
 
 You can find information and tutorials about this repository and the others that are part of the e-MDB cognitive architecture software in the [PILLAR Robots official documentation](https://docs.pillar-robots.eu/en/latest/)
 

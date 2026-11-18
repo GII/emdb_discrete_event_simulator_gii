@@ -1,0 +1,52 @@
+<!--
+  UR5e + ball + box scene for e-MDB experiments.
+  IMPORTANT: place this file INSIDE mujoco_menagerie/universal_robots_ur5e/
+  so that the include and the relative asset paths (meshdir="assets") resolve.
+-->
+<mujoco model="ur5e_ball_box">
+  <include file="ur5e.xml"/>
+
+  <statistic center="0.4 0 0.3" extent="1.2"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4"
+             rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Ball: free body, gets randomized on world reset.
+         - armature adds rotational inertia to the free joint so the light
+           sphere's spin DOFs (9/10/11) don't blow up to NaN QACC when the
+           stiff gripper contact torques it. This is the key stability fix.
+         - joint damping brakes roll-away (paired with _rescue_ball in code).
+         - condim stays at the default 3 (sliding friction only); torsional
+           and rolling friction are deliberately NOT enabled, as they are a
+           known MuJoCo instability source for small spheres. -->
+    <body name="ball" pos="0.5 0.15 0.03">
+      <joint type="free" name="ball_free" damping="0.03" armature="0.005"/>
+      <geom name="ball_geom" type="sphere" size="0.03" mass="0.05" rgba="0.9 0.2 0.2 1"
+            friction="0.8 0.005 0.0001"/>
+    </body>
+
+    <!-- Box: static, open-top container -->
+    <body name="box" pos="0.45 -0.35 0.0">
+      <geom name="box_bottom" type="box" size="0.08 0.08 0.005" pos="0 0 0.005" rgba="0.25 0.45 0.85 1"/>
+      <geom name="box_wall_n" type="box" size="0.08 0.008 0.04" pos="0 0.088 0.04" rgba="0.25 0.45 0.85 1"/>
+      <geom name="box_wall_s" type="box" size="0.08 0.008 0.04" pos="0 -0.088 0.04" rgba="0.25 0.45 0.85 1"/>
+      <geom name="box_wall_e" type="box" size="0.008 0.08 0.04" pos="0.088 0 0.04" rgba="0.25 0.45 0.85 1"/>
+      <geom name="box_wall_w" type="box" size="0.008 0.08 0.04" pos="-0.088 0 0.04" rgba="0.25 0.45 0.85 1"/>
+      <site name="box_site" pos="0 0 0.05" size="0.01" rgba="0 0 0 0"/>
+    </body>
+  </worldbody>
+</mujoco>

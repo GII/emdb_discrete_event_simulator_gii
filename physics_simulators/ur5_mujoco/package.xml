@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ur5_mujoco</name>
+  <version>0.1.0</version>
+  <description>MuJoCo simulator of a UR5e arm (magnet, Robotiq 2F-85 or OnRobot 2FG7 gripper) for e-MDB experiments with a ball (and a box)</description>
+  <maintainer email="alu0101278919@ull.edu.es">jpperezm</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>core</depend>
+  <depend>core_interfaces</depend>
+  <depend>cognitive_node_interfaces</depend>
+  <depend>cognitive_processes_interfaces</depend>
+  <depend>simulators_interfaces</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

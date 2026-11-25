@@ -1,0 +1,41 @@
+OnRobot 2FG7 for MuJoCo (2fg7.xml)
+
+Source: https://github.com/onrobot/onrobot-ros2, package onrobot_2fg7
+  commit 1b24536e4ae58b127025a4336fd1f06109c54801 (2026-10-19, "Fix RG body mounts and prepare ROS suite 1.3.1 (#10)"),
+  downloaded 2026-11-10. BSD-3-Clause, Copyright (c) 2026, OnRobot A/S: see LICENSE (unchanged).
+Configuration: standard fingertips, fingertip_material silicone, fingertip_orientation outwards (the lab gripper),
+  mounted directly on the UR5e flange.
+
+Files
+- assets/finger_base_link.stl, assets/silicone_fingertip_link.stl: onrobot_2fg7/meshes/*.STL, unchanged (only the
+  extension lowercased).
+- assets/base_link.obj: onrobot_2fg7/meshes/base_link.STL (204,155 triangles) converted to OBJ without loss (the
+  same triangles, shared vertices merged), because MuJoCo's STL reader accepts at most 200,000 faces.
+  The official .dae visuals are Git LFS objects and were not used; the STLs are what the official "realmesh"
+  description uses for collision, in the same frames.
+- urdf/onrobot_2fg7_macro.xacro: unchanged, for reference.
+- urdf/onrobot_2fg7_silicone_outwards.urdf: generated from it with
+    xacro <wrapper calling xacro:onrobot_2fg7 include_ros2_control="false"> \
+      fingertip_material:=silicone fingertip_orientation:=outwards mesh_path:=package://onrobot_2fg7/meshes
+- 2fg7.xml: written from that URDF: body frames, finger joints and stroke, masses, inertias and the collision boxes
+  (body box, silicone gripping plates, fingertip mounting blocks) are the URDF's. Differences:
+  1. The finger joint value is the distance from the centre to the finger's pad face (ref 16.5 mm), so the URDF's
+     stroke 0..19 mm is 16.5..35.5 mm and the tendon right + left is the aperture between the pads.
+  2. Aperture 33-71 mm, not the datasheet's 35-73 mm: the datasheet range is for the aluminium fingertips, and the
+     silicone layer is 1 mm thick on each face (datasheet: "silicone fingertips add 1 mm in each direction"; the
+     official silicone collision plates are 1 mm thicker per side than the aluminium ones).
+  3. Fingertip inertia: the plain URDF's orientation. The xacro turns the fingertip's inertial frame by pi about x,
+     which flips the sign of its products of inertia; the plain URDF's sign fits the L-shaped fingertip.
+     Negligible either way (33 g).
+  4. Finger base inertial: the xacro gives one finger a centre-of-mass offset and the other none; both get the offset
+     (they are the same part).
+  5. MuJoCo-only parts, mine (the URDF has nothing for MuJoCo): the aperture servo (kp 10000 N/m, kv 100 N s/m,
+     force limit = grip force), the finger coupling (joint equality), armature 0.5 and damping 2 on the finger
+     joints, and the pad contact (friction 1 / 0.005 / 0.0001, condim 4, solref 0.004 1, priority 1). The URDF's
+     Gazebo friction for silicone is 0.4, which OnRobot's README calls a simulation input to adjust, not a
+     measured value.
+
+Datasheet (OnRobot 2FG7 datasheet v2.0, https://onrobot.com/storage/datasheets/2fg7/datasheet_2fg7_v2.0_en.pdf):
+  stroke 38 mm; external grip 1-39 mm (fingers inwards) / 35-73 mm (outwards); force 20-140 N, +-5 N; speed
+  16-450 mm/s; gripping time ~200 ms (4 mm stroke, 80 N, incl. brake), ~300 ms (38 mm, 80 N); repeatability
+  +-0.1 mm; 1.1 kg; force sensor in one finger; holds the workpiece if power is lost.

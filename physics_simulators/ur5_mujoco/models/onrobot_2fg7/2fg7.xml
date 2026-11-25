@@ -1,0 +1,136 @@
+<!--
+  OnRobot 2FG7 electric parallel gripper, silicone fingertips mounted outwards (the lab's configuration).
+
+  Built from OnRobot's official ROS 2 description (github.com/onrobot/onrobot-ros2, package onrobot_2fg7,
+  BSD-3-Clause, see LICENSE and SOURCE.txt): the meshes are the official STLs, unchanged; the frames, finger
+  joints, masses, inertias and collision boxes are the ones of urdf/onrobot_2fg7_silicone_outwards.urdf (generated
+  from the official xacro with fingertip_material:=silicone fingertip_orientation:=outwards).
+
+  Frames (body base_mount): origin on the mounting face, z out of the tool, the fingers move along x.
+  Site pinch: halfway between the two silicone pad centres, 140 mm from the mounting face; z out of the tool and
+  the fingers close along its y axis (the same convention as the Robotiq 2F-85's pinch site).
+
+  Grip: fingers_actuator is a position servo on the APERTURE, the distance between the two silicone pad faces,
+  in metres: ctrl 0.033 = fully closed .. 0.071 = fully open; actuator_length is the current aperture and
+  actuator_force the grip force in N (negative while squeezing), what the real driver reports. The datasheet's 35-73 mm range is for the aluminium
+  fingertips; the silicone layer is 1 mm thick on each face ("silicone fingertips add 1 mm in each direction"),
+  which the official collision boxes reproduce, so with silicone tips the range is 33-71 mm.
+  The servo force limit (forcerange) is the grip force, 20-140 N on the real gripper: commanding an aperture
+  smaller than the object makes the servo saturate against it, so the pads squeeze it with exactly that force,
+  which is what the real gripper's force-controlled grip does. Set it at runtime with
+  model.actuator_forcerange[id] = [-F, F]. The default is the lowest setting, 20 N.
+  The real gripper moves at a set speed (16-450 mm/s, aperture rate): ramp ctrl at that speed. A step command
+  closes much faster than the real gripper can.
+-->
+<mujoco model="onrobot_2fg7">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <option cone="elliptic" impratio="10"/>
+
+  <asset>
+    <!-- Colours of the official URDF -->
+    <material name="body" rgba="0.753 0.753 0.753 1"/>
+    <material name="finger" rgba="1 1 1 1"/>
+    <material name="silicone" rgba="0.957 0.949 0.961 1"/>
+
+    <mesh class="2fg7" name="base" file="base_link.obj"/>
+    <mesh class="2fg7" name="finger_base" file="finger_base_link.stl"/>
+    <mesh class="2fg7" name="fingertip" file="silicone_fingertip_link.stl"/>
+  </asset>
+
+  <default>
+    <default class="2fg7">
+      <general biastype="affine"/>
+      <!-- Finger slide, 19 mm of stroke (URDF finger_stroke). The joint value is the distance from the centre to
+           the finger's pad face: 16.5 mm closed (the body positions below, hence ref) .. 35.5 mm open, so the
+           aperture is simply right + left. The armature stands for the inertia of the motor and screw drive seen
+           at the finger; it keeps the stiff aperture servo stable at the 2 ms step. -->
+      <joint type="slide" axis="0 0 1" ref="0.0165" range="0.0165 0.0355" armature="0.5" damping="2"
+        solimplimit="0.95 0.99 0.001" solreflimit="0.005 1"/>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom type="box" group="3" mass="0"/>
+        <!-- Silicone gripping plate (URDF fingertip top collision box, 38 x 34 x 7 mm): silicone rubber on a
+             rubber or plastic ball has a friction coefficient around 1 (the URDF's Gazebo value, 0.4, is a
+             conservative simulation input, per OnRobot's README); torsional friction (condim 4) so a held ball
+             can't spin around the grip axis; soft contact like the 2F-85's silicone pads; priority so the
+             pad, not the object, sets the contact. -->
+        <default class="pad">
+          <geom pos="0.027 0 0.0085" size="0.019 0.017 0.0035" friction="1 0.005 0.0001" condim="4"
+            solimp="0.95 0.99 0.001" solref="0.004 1" priority="1" rgba="0.55 0.55 0.55 1"/>
+        </default>
+        <!-- The block that fixes the fingertip to the finger (URDF fingertip bottom collision box) -->
+        <default class="tip_base">
+          <geom pos="0.0035 0 0.00144" size="0.0035 0.0137 0.0096" rgba="0.45 0.45 0.45 1"/>
+        </default>
+      </default>
+    </default>
+  </default>
+
+  <worldbody>
+    <body name="base_mount" childclass="2fg7">
+      <inertial mass="1.01367" pos="-0.00025007 -0.00012025 0.0604924"
+        fullinertia="7.95915e-4 1.05686e-3 9.69772e-4 -9.38023e-8 4.67927e-7 -2.27483e-7"/>
+      <geom class="visual" mesh="base" material="body"/>
+      <geom class="collision" pos="0 0 0.0561" size="0.045 0.0355 0.057245"/>
+      <site name="pinch" pos="0 0 0.13999" quat="0.7071068 0 0 -0.7071068" type="sphere" group="5"
+        rgba="0.9 0.9 0.9 1" size="0.005"/>
+
+      <!-- Finger frames (URDF joint origins): x = out of the tool, z = opening direction, y = pad width -->
+      <body name="right_finger" pos="0.0115 0 0.11299" quat="0 0.7071068 0 0.7071068">
+        <inertial mass="0.0089293" pos="-0.0055033 -0.0044719 -0.009707"
+          fullinertia="2.69776e-6 2.27015e-6 5.82712e-7 -1.23118e-7 -2.38478e-7 -4.67205e-7"/>
+        <joint name="right_finger_joint"/>
+        <geom class="visual" mesh="finger_base" material="finger"/>
+        <body name="right_fingertip">
+          <inertial mass="0.0328043" pos="0.0183616 -2.1164e-6 0.0058662"
+            fullinertia="2.83649e-6 5.84748e-6 7.46158e-6 -1.25102e-9 -8.61288e-7 5.58139e-9"/>
+          <geom class="visual" mesh="fingertip" material="silicone"/>
+          <geom name="right_pad" class="pad"/>
+          <geom name="right_tip_base" class="tip_base"/>
+        </body>
+      </body>
+
+      <body name="left_finger" pos="-0.0115 0 0.11299" quat="0.7071068 0 -0.7071068 0">
+        <inertial mass="0.0089293" pos="-0.0055033 -0.0044719 -0.009707"
+          fullinertia="2.69776e-6 2.27015e-6 5.82712e-7 -1.23118e-7 -2.38478e-7 -4.67205e-7"/>
+        <joint name="left_finger_joint"/>
+        <geom class="visual" mesh="finger_base" material="finger"/>
+        <body name="left_fingertip">
+          <inertial mass="0.0328043" pos="0.0183616 -2.1164e-6 0.0058662"
+            fullinertia="2.83649e-6 5.84748e-6 7.46158e-6 -1.25102e-9 -8.61288e-7 5.58139e-9"/>
+          <geom class="visual" mesh="fingertip" material="silicone"/>
+          <geom name="left_pad" class="pad"/>
+          <geom name="left_tip_base" class="tip_base"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- aperture = right + left (the joint values are the pad faces' distances from the centre), so the actuator
+       length is the aperture in metres. The two fingers move together (one motor, centric), so the equality
+       keeps them symmetric; the tendon applies the servo force to both, so each pad presses with the actuator
+       force: actuator_force is the grip force, negative while squeezing an object. -->
+  <tendon>
+    <fixed name="aperture">
+      <joint joint="right_finger_joint" coef="1"/>
+      <joint joint="left_finger_joint" coef="1"/>
+    </fixed>
+  </tendon>
+
+  <equality>
+    <joint joint1="right_finger_joint" joint2="left_finger_joint" polycoef="0 1 0 0 0" solimp="0.95 0.99 0.001"
+      solref="0.005 1"/>
+  </equality>
+
+  <!-- Position servo on the aperture: force = kp (ctrl - aperture) - kv d(aperture)/dt, clamped to forcerange.
+       kp = 10000 N/m: 1 mm of squeeze is 10 N, so the force saturates at any grip setting for objects at least
+       14 mm wider than the commanded aperture (a 50 mm ball with the gripper commanded closed: 170 N > 140 N).
+       kv = 100 N s/m: about critical for the 0.27 kg the aperture moves (fingers + armature). -->
+  <actuator>
+    <general class="2fg7" name="fingers_actuator" tendon="aperture" ctrlrange="0.033 0.071" forcerange="-20 20"
+      gainprm="10000 0 0" biasprm="0 -10000 -100"/>
+  </actuator>
+</mujoco>

@@ -52,6 +52,8 @@ class FruitShopSim(Node):
         self.rejected_fruit_pos = {"distance":0.8, "angle":65*(numpy.pi/180)}
         self.fruit_right_side_pos = {"distance":0.8, "angle":5*(numpy.pi/360)}
         self.fruit_left_side_pos = {"distance":0.8, "angle":-5*(numpy.pi/360)}
+        self.fruit_grasped_left_pos = {"distance":0.4, "angle":-0.05}
+        self.fruit_grasped_right_pos = {"distance":0.4, "angle":0.05}
 
         self.fruit_correctly_accepted = False
         self.fruit_correctly_rejected = False
@@ -200,14 +202,18 @@ class FruitShopSim(Node):
         self.perceptions["fruit_in_right_hand"].data = False
         self.perceptions["fruit_in_left_hand"].data = False
         if self.rng.uniform() > 0.5 and self.fruits:
+            self.catched_fruit = self.closest_fruit
+
             if self.perceptions["fruits"].data[0].angle > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
                 self.perceptions["fruit_in_left_hand"].data = False
+                self.catched_fruit["distance"] = self.fruit_grasped_right_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_right_pos["angle"]
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
                 self.perceptions["fruit_in_right_hand"].data = False
-
-            self.catched_fruit = self.closest_fruit
+                self.catched_fruit["distance"] = self.fruit_grasped_left_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_left_pos["angle"]
 
         self.perceptions["button_light"].data = False if self.rng.uniform() > 0.5 else True
 
@@ -221,10 +227,15 @@ class FruitShopSim(Node):
         """
         scale = self.perceptions["scales"].data[0]
         if not self.catched_fruit and self.fruits:
+            self.catched_fruit = self.closest_fruit
             if self.closest_fruit["angle"] > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
+                self.catched_fruit["distance"] = self.fruit_grasped_right_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_right_pos["angle"]
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
+                self.catched_fruit["distance"] = self.fruit_grasped_left_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_left_pos["angle"]
             if scale.active:
                 scale.active = False
                 #scale.state = 0
@@ -234,7 +245,6 @@ class FruitShopSim(Node):
                     raise RuntimeError("The tested fruit should be the closest fruit!!")
             self.fruit_correctly_rejected = False
             self.fruit_correctly_accepted = False
-            self.catched_fruit = self.closest_fruit
     
     def change_hands_policy(self):
         """

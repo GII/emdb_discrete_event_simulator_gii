@@ -1,0 +1,1 @@
+Source: google-deepmind/mujoco_menagerie robotiq_2f85 @ 98a70c569c4c1b6da467a20012f766ee1f8dc521 (2026-11-02), unmodified.

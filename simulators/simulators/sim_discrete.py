@@ -7,14 +7,21 @@ import yamlloader
 import numpy
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
+try:
+    # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
+    from rclpy.experimental import EventsExecutor
+except ImportError:
+    EventsExecutor = None
 from rclpy.executors import ExternalShutdownException
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 from core.service_client import ServiceClient
+from core.blocking_wait_check import register_executor_thread
 
 from core_interfaces.srv import LoadConfig
 from simulators_interfaces.srv import CalculateClosestPosition, ObjectPickableWithTwoHands, ObjectTooFar
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 
 class World(Enum):
     """
@@ -61,7 +68,6 @@ class LTMSim(Node):
         self.last_reset_iteration = 0
         self.world = None
         self.base_messages = {}
-        self.service_world_reset = True
         self.perceptions = {}
         self.sim_publishers = {}
         self.catched_object = None
@@ -361,7 +367,7 @@ class LTMSim(Node):
         """
         Return True if the ball is small, False if it is big. Right now, small is 0.03 and big 0.07.
 
-        :param rad: Radius of the ball.
+        :param rad: Diameter of the ball.
         :type rad: float
         :return: The value that indicates if the ball is small or not.
         :rtype: bool
@@ -411,7 +417,7 @@ class LTMSim(Node):
     
     def object_in_close_box(self, dist, ang):
         """
-        Check if there is an object inside of a box.
+        Check if there is an object inside of a box within reach of the robot.
 
         :param dist: The distance to the object.
         :type dist: float
@@ -430,7 +436,7 @@ class LTMSim(Node):
     
     def object_in_far_box(self, dist, ang):
         """
-        Check if there is an object inside of a box.
+        Check if there is an object inside of a box out of reach of the robot.
 
         :param dist: The distance to the object.
         :type dist: float
@@ -914,9 +920,8 @@ class LTMSim(Node):
         """
         Reset the world to a random state.
 
-        :param data: The message that contains the command to reset the world. It is not used.
-        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or 
-            cognitive_processes_interfaces.srv.WorldReset.Request
+        :param data: The message that contains the command to reset the world. It provides the iteration and the world.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         self.last_reset_iteration = data.iteration
@@ -933,15 +938,15 @@ class LTMSim(Node):
     
     def new_command_callback(self, data):
         """
-        Process a command received.
+        Process a command received. Only the "end" command has an effect: world resets arrive through the
+        world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
-        if data.command == "reset_world" and not self.service_world_reset:
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 
@@ -1038,7 +1043,6 @@ class LTMSim(Node):
             self.get_logger().info("Creating perception publisher timer... ")
             self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
         if service_world_reset:
-            self.service_world_reset = True
             classname= simulation["executed_policy_msg"]
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
             self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
@@ -1069,7 +1073,8 @@ class LTMSim(Node):
 
     def load_configuration(self):
         """
-        Load configuration from a file.
+        Load configuration from a file: the sections SimulatedBaxter and Control of the experiment configuration
+        file. Then it asks the commander to load the experiment.
         """
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")
@@ -1087,11 +1092,9 @@ class LTMSim(Node):
                 self.setup_perceptions(config["SimulatedBaxter"]["Perceptions"])
                 # Be ware, we can not subscribe to control channel before creating all sensor publishers.
                 self.setup_control_channel(config["Control"])
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
         
         self.load_experiment_file_in_commander()
 
@@ -1099,9 +1102,14 @@ def main(args=None):
     rclpy.init(args=args)
     sim = LTMSim()
     sim.load_configuration()
+    # Much cheaper than the Python executors. The simulator runs in a single thread either way, and
+    # none of its callbacks waits for anything, so callback groups are not needed.
+    executor = EventsExecutor() if EventsExecutor is not None else SingleThreadedExecutor()
+    executor.add_node(sim)
+    register_executor_thread() # The callbacks of the EventsExecutor are not visible in the Python stack
 
     try:
-        rclpy.spin(sim)
+        executor.spin()
     except KeyboardInterrupt:
         print('Keyboard Interrupt Detected: Shutting down simulator...')
     finally:

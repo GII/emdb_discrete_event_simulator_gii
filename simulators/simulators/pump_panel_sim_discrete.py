@@ -4,11 +4,18 @@ import yaml
 import yamlloader
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
+try:
+    # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
+    from rclpy.experimental import EventsExecutor
+except ImportError:
+    EventsExecutor = None
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from core.service_client import ServiceClient
+from core.blocking_wait_check import register_executor_thread
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname, EncodableDecodableEnum, actuation_msg_to_dict
+from core.utils import class_from_classname, EncodableDecodableEnum, actuation_msg_to_dict, resolve_seed
 
 class PumpObjects(EncodableDecodableEnum):
     """
@@ -270,7 +277,7 @@ class PumpPanelSim(Node):
 
         :param data: The message that contains the command to reset the world. It is not used.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg or
-        cognitive_processes_interfaces.srv.WorldReset.Request
+            cognitive_processes_interfaces.srv.WorldReset.Request
         """
         self.get_logger().info("Resetting world...")
         self.initial_perceptions()
@@ -310,18 +317,18 @@ class PumpPanelSim(Node):
 
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received: it simulates the values of the panel and updates the iteration and the reward sensor.
+        Only the "end" command has another effect, since world resets arrive through the world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.simulate_values()
         self.iteration = data.iteration
         self.update_reward_sensor()
-        if data.command == "reset_world":
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 
@@ -330,11 +337,11 @@ class PumpPanelSim(Node):
         Execute a policy and publish new perceptions.
 
         :param request: The message that contains the policy execute and its parameter.
-        :type request: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Request
+        :type request: ROS srv defined in the config file. It has the policy and parameter fields.
         :param response: Response of the success of the execution of the action.
-        :type response: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
+        :type response: ROS srv defined in the config file.
         :return: Response indicating the success of the action execution.
-        :rtype: ROS srv defined in the config file. Typically cognitive_node_interfaces.srv.PolicyParametrized.Response
+        :rtype: ROS srv defined in the config file.
         """
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
@@ -422,11 +429,9 @@ class PumpPanelSim(Node):
         It is configured the random number generator, the stages of the experiment,
         the perceptions, and the control channel.
         """
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")
@@ -451,9 +456,14 @@ def main(args=None):
     rclpy.init(args=args)
     sim = PumpPanelSim()
     sim.load_configuration()
+    # Much cheaper than the Python executors. The simulator runs in a single thread either way, and
+    # none of its callbacks waits for anything, so callback groups are not needed.
+    executor = EventsExecutor() if EventsExecutor is not None else SingleThreadedExecutor()
+    executor.add_node(sim)
+    register_executor_thread() # The callbacks of the EventsExecutor are not visible in the Python stack
 
     try:
-        rclpy.spin(sim)
+        executor.spin()
     except KeyboardInterrupt:
         print('Keyboard Interrupt Detected: Shutting down simulator...')
     finally:

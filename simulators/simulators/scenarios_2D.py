@@ -2,7 +2,9 @@ import math
 import numpy as np
 from enum import Enum
 import matplotlib
-
+import os
+if not os.environ.get('MPLBACKEND'):
+    matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib.axes import Axes
@@ -379,8 +381,8 @@ class Sim(object):
     """ Class that implements a Simulator
     
     This simulator makes possible to make/test different experiments in a virtual scenario.
-    It contains the two arms of the Baxter robot, the Robobo! robot, some boxes and a
-    ball.
+    It is the base class of the scenarios, which add the robot and the objects: Baxter2Arms has the two arms of the
+    Baxter robot, and SimpleScenario adds a ball and a box to them.
     
     The implemented methods allow the user to move both robots throw the scenario (with
     and without the ball), get distances and relative angles between the different objects 
@@ -420,11 +422,10 @@ class Sim(object):
 
         # Generate Plots
         if self.visualize:
-            matplotlib.use('TkAgg')
             plt.rcParams['toolbar'] = 'None'  # Disable toolbar
             plt.ioff()  # Turn off interactive mode
             self.fig = plt.figure()
-            self.fig.canvas.set_window_title('Simulator')
+            self.fig.canvas.manager.set_window_title('Simulator')
             self.ax = plt.axes(xlim=self.x_plt_bounds, ylim=self.y_plt_bounds)
             self.ax.axes.get_xaxis().set_visible(False)
             self.ax.axes.get_yaxis().set_visible(False)
@@ -634,6 +635,8 @@ class Baxter2Arms(Sim):
         :type x_bounds: tuple
         :param y_bounds: Movement limits in the y axis.
         :type y_bounds: tuple
+        :param grasp_range: Maximum distance to grasp an object.
+        :type grasp_range: float
         :param visualize: If True, the simulator will visualize the objects in a plot.
         :type visualize: bool
         :param verbose: If True, the simulator will print debug information.
@@ -794,6 +797,10 @@ class SimpleScenario(Baxter2Arms):
         :type x_bounds: tuple
         :param y_bounds: Movement limits in the y axis.
         :type y_bounds: tuple
+        :param grasp_range: Maximum distance to grasp an object.
+        :type grasp_range: float
+        :param place_range: Maximum distance to place an object.
+        :type place_range: float
         :param visualize: If True, the simulator will visualize the objects in a plot.
         :type visualize: bool
         :param logger: Logger to log debug information.
@@ -874,7 +881,7 @@ class SimpleScenario(Baxter2Arms):
         self.baxter_right.set_pos(rng.uniform(self.baxter_right_limits[0][0], self.baxter_right_limits[0][1]), rng.uniform(self.baxter_right_limits[1][0], self.baxter_right_limits[1][1])) 
         self.baxter_left.set_gripper(False)
         self.baxter_right.set_gripper(False)
-        
+        self.box1.set_pos(rng.uniform(self.x_bounds[0], self.x_bounds[1]), rng.uniform(self.y_bounds[0], self.y_bounds[1]))
         self.box1.contents=[]
         #TODO: Reset grippers
 

@@ -4,11 +4,18 @@ import yaml
 import yamlloader
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
+try:
+    # Event-driven executor implemented in C++ (ROS 2 Jazzy and later).
+    from rclpy.experimental import EventsExecutor
+except ImportError:
+    EventsExecutor = None
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from core.service_client import ServiceClient
+from core.blocking_wait_check import register_executor_thread
 from core_interfaces.srv import LoadConfig
-from core.utils import class_from_classname
+from core.utils import class_from_classname, resolve_seed
 
 class FruitShopSim(Node):
     """
@@ -45,6 +52,8 @@ class FruitShopSim(Node):
         self.rejected_fruit_pos = {"distance":0.8, "angle":65*(numpy.pi/180)}
         self.fruit_right_side_pos = {"distance":0.8, "angle":5*(numpy.pi/360)}
         self.fruit_left_side_pos = {"distance":0.8, "angle":-5*(numpy.pi/360)}
+        self.fruit_grasped_left_pos = {"distance":0.4, "angle":-0.05}
+        self.fruit_grasped_right_pos = {"distance":0.4, "angle":0.05}
 
         self.fruit_correctly_accepted = False
         self.fruit_correctly_rejected = False
@@ -193,14 +202,18 @@ class FruitShopSim(Node):
         self.perceptions["fruit_in_right_hand"].data = False
         self.perceptions["fruit_in_left_hand"].data = False
         if self.rng.uniform() > 0.5 and self.fruits:
+            self.catched_fruit = self.closest_fruit
+
             if self.perceptions["fruits"].data[0].angle > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
                 self.perceptions["fruit_in_left_hand"].data = False
+                self.catched_fruit["distance"] = self.fruit_grasped_right_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_right_pos["angle"]
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
                 self.perceptions["fruit_in_right_hand"].data = False
-
-            self.catched_fruit = self.closest_fruit
+                self.catched_fruit["distance"] = self.fruit_grasped_left_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_left_pos["angle"]
 
         self.perceptions["button_light"].data = False if self.rng.uniform() > 0.5 else True
 
@@ -214,10 +227,15 @@ class FruitShopSim(Node):
         """
         scale = self.perceptions["scales"].data[0]
         if not self.catched_fruit and self.fruits:
+            self.catched_fruit = self.closest_fruit
             if self.closest_fruit["angle"] > 0.0:
                 self.perceptions["fruit_in_right_hand"].data = True
+                self.catched_fruit["distance"] = self.fruit_grasped_right_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_right_pos["angle"]
             else:
                 self.perceptions["fruit_in_left_hand"].data = True
+                self.catched_fruit["distance"] = self.fruit_grasped_left_pos["distance"]
+                self.catched_fruit["angle"] = self.fruit_grasped_left_pos["angle"]
             if scale.active:
                 scale.active = False
                 #scale.state = 0
@@ -227,7 +245,6 @@ class FruitShopSim(Node):
                     raise RuntimeError("The tested fruit should be the closest fruit!!")
             self.fruit_correctly_rejected = False
             self.fruit_correctly_accepted = False
-            self.catched_fruit = self.closest_fruit
     
     def change_hands_policy(self):
         """
@@ -396,7 +413,8 @@ class FruitShopSim(Node):
 
     def reward_place_fruit_goal(self):
         """
-        Gives a reward of 1.0 if the fruit is placed in the center of the table.
+        Gives a reward of 1.0 if the fruit is placed in the center of the table. This only applies between stage0 and
+        stage1: in the other stages, the reward is always 1.0.
         """
         reward = 0.0 
         if (self.iteration > self.change_reward_iterations['stage0']) and (self.iteration <= self.change_reward_iterations['stage1']):
@@ -477,17 +495,17 @@ class FruitShopSim(Node):
 
     def new_command_callback(self, data):
         """
-        Process a command received
+        Process a command received: it updates the iteration and the reward sensor. Only the "end" command has another
+        effect, since world resets arrive through the world reset service.
 
-        :param data: The message that contais the command received.
+        :param data: The message that contains the command received.
         :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
         """
         self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
         self.iteration = data.iteration
         self.update_reward_sensor()
-        if data.command == "reset_world":
-            self.reset_world(data)
-        elif data.command == "end":
+        # World resets arrive through the world reset service, not through this topic
+        if data.command == "end":
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown()
 
@@ -602,11 +620,9 @@ class FruitShopSim(Node):
         It is configured the random number generator, the stages of the experiment,
         the perceptions, and the control channel.
         """
-        if self.random_seed:
-            self.rng = numpy.random.default_rng(self.random_seed)
-            self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
-        else:
-            self.rng = numpy.random.default_rng()
+        self.random_seed = resolve_seed(self.random_seed)
+        self.rng = numpy.random.default_rng(self.random_seed)
+        self.get_logger().info(f"Setting random number generator with seed {self.random_seed}")
 
         if self.config_file is None:
             self.get_logger().error("No configuration file for the LTM simulator specified!")
@@ -632,9 +648,14 @@ def main(args=None):
     rclpy.init(args=args)
     sim = FruitShopSim()
     sim.load_configuration()
+    # Much cheaper than the Python executors. The simulator runs in a single thread either way, and
+    # none of its callbacks waits for anything, so callback groups are not needed.
+    executor = EventsExecutor() if EventsExecutor is not None else SingleThreadedExecutor()
+    executor.add_node(sim)
+    register_executor_thread() # The callbacks of the EventsExecutor are not visible in the Python stack
 
     try:
-        rclpy.spin(sim)
+        executor.spin()
     except KeyboardInterrupt:
         print('Keyboard Interrupt Detected: Shutting down simulator...')
     finally:
